@@ -17,6 +17,7 @@ class NewTag(StrictModel):
 
 
 class Enrichment(StrictModel):
+    text_readable: bool
     title: str = Field(max_length=160)
     new_tags: list[NewTag] = Field(max_length=3)
 

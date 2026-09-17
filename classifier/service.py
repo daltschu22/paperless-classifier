@@ -43,7 +43,7 @@ class Service:
         text = document.get("content") or ""
         cache_key = digest({"instance": self.settings.paperless_url, "input": text_hash(document),
             "taxonomy": taxonomy, "options": options.model_dump(), "jev": self.settings.jev_model,
-            "generative": self.settings.generative_model, "prompt": "hybrid-v1"})
+            "generative": self.settings.generative_model, "prompt": "hybrid-v3-readability"})
         analysis = self.store.cache_get(cache_key)
         cached = analysis is not None
         if analysis is None:
@@ -64,6 +64,19 @@ class Service:
             if options.enrich:
                 enriched, cost = self.generative.enrich(text, taxonomy)
                 usage.append({"provider": "generative", **cost})
+                if not enriched["text_readable"] and source == "paperless_ocr" and options.vision_fallback:
+                    data, mime = self.paperless.file(document["id"])
+                    vision, cost = self.generative.vision(data, mime)
+                    usage.append({"provider": "vision", **cost})
+                    if not vision["legible"] or not vision["text"].strip():
+                        raise AppError("scan_unreadable", "The original scan is not readable enough to classify.")
+                    text, source = vision["text"], "vision"
+                    if len(text) > self.settings.max_characters:
+                        raise AppError("input_too_large", "Vision text exceeds the processing limit.")
+                    enriched, cost = self.generative.enrich(text, taxonomy)
+                    usage.append({"provider": "generative", **cost})
+                if not enriched["text_readable"]:
+                    raise AppError("ocr_unreliable", "The document text is too garbled to classify. Read the original with vision or review it in Paperless.")
                 enriched = clean_suggestions(enriched, taxonomy, text)
             answers, cost = self.jev.classify(text, taxonomy, enriched["new_tags"])
             usage.append({"provider": "jev", **cost})

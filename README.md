@@ -56,7 +56,7 @@ The homelab deployment is managed separately in `home-ansible` using Podman Quad
 .venv/bin/python tools/browser_smoke.py --screenshots private/browser-smoke
 ```
 
-The shared check runs 37 offline tests and the original research harness dry runs. Tests cover authentication, CSRF, independent tag classification, caching, stale approvals, preserved tags, new-tag deduplication, uncertain writes, restart recovery, and input limits. The browser smoke checks login, review, new-tag approval, application, history, settings, and mobile layout. Live provider smoke checks used synthetic text and a synthetic scan; see [build validation](docs/build-validation.md).
+The shared check runs 40 offline tests and the original research harness dry runs. Tests cover authentication, CSRF, independent tag classification, caching, stale approvals, preserved tags, new-tag deduplication, uncertain writes, restart recovery, and input limits. The browser smoke checks login, review, new-tag approval, application, history, settings, and mobile layout. Live provider smoke checks used synthetic text and a synthetic scan; see [build validation](docs/build-validation.md).
 
 ## Read more
 

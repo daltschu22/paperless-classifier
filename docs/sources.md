@@ -10,11 +10,15 @@ compatibility with a deployed Paperless version or prove classification quality.
 - [TypeSafe confidence](https://docs.typesafe.ai/confidence): interpretation of
   probabilities and the separate confidence statistic.
 - [TypeSafe Python SDK](https://github.com/typesafe-ai/typesafe-sdk-python):
-  official client; validate and pin a version during implementation.
+  official client; the implementation pins version 0.6.0.
 - [Paperless-ngx REST API source](https://github.com/paperless-ngx/paperless-ngx/blob/main/docs/api.md):
   authentication, pagination, metadata operations, and API version negotiation.
 - [Paperless matching](https://github.com/paperless-ngx/paperless-ngx/blob/main/docs/advanced_usage.md#matching):
   existing rules and learned matching to use as a baseline.
+- [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs):
+  typed Responses API output parsing for enrichment and vision.
+- [OpenAI images and vision](https://developers.openai.com/api/docs/guides/images-vision):
+  image input through data URLs.
 - [Paperless-GPT](https://github.com/icereed/paperless-gpt): inspiration for the
   companion application workflow, with broader OCR and generation scope.
 
