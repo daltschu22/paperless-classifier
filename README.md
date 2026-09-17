@@ -6,8 +6,8 @@ Turn document OCR into useful metadata: choose a document type, apply existing
 tags, and route ambiguous results to a review queue. The goal is the convenience
 of Paperless-GPT with a focused, measurable classification workflow.
 
-**Status: project outline and implementation plan. No application is implemented
-or deployed yet.**
+**Status: outline, implementation plan, and a working synthetic Jev investigation
+harness. The Paperless application and integration are not implemented or deployed.**
 
 ## Planned experience
 
@@ -29,8 +29,13 @@ hosted TypeSafe API; the application itself runs locally.
 - [Architecture](docs/architecture.md): data flow, decisions, and update behavior.
 - [Synthetic example](examples/classification.json): an illustrative proposal.
 - [Source notes](docs/sources.md): upstream references and verification work.
+- [Initial Jev investigation](docs/investigation-2026-09-17.md): measured results,
+  limitations, and reproduction commands.
 
-The first implementation milestone is a read-only CLI that classifies a selected
-document and saves a proposal. Review UI and write-back follow that foundation.
+The next implementation milestone is a read-only Paperless CLI that classifies
+a selected real document and saves a proposal. Review UI and write-back follow
+that foundation. The research harness already tests synthetic classification
+through the official SDK. Run `./check` for offline checks; live experiment
+instructions are in the investigation report.
 
 This is an independent project, not an official Paperless-ngx or TypeSafe product.
