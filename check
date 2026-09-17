@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
+if [[ -x .venv/bin/python ]]; then
+    export PATH="$PWD/.venv/bin:$PATH"
+fi
 python3 -m unittest discover -s tests -v
 python3 tools/investigate_jev.py
 python3 tools/investigate_jev.py --scale

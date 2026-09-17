@@ -1,6 +1,6 @@
 # Working in this repository
 
-Paperless Classifier currently contains a plan and a synthetic API research harness. Read README.md,
+Paperless Classifier contains the hybrid review application and a synthetic API research harness. Read README.md,
 OUTLINE.md, PLAN.md, and docs/architecture.md before implementation. Keep completed
 features distinct from planned behavior, and update milestone status with evidence.
 

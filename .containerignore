@@ -1,0 +1,7 @@
+*
+!Containerfile
+!requirements.txt
+!classifier/
+!classifier/**
+**/__pycache__/
+**/*.pyc
