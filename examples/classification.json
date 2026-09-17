@@ -1,0 +1,43 @@
+{
+  "example_only": true,
+  "description": "Synthetic planning illustration, not a TypeSafe response or a complete persistence record.",
+  "input": {
+    "document_id": 101,
+    "ocr_text": "Example Electric Cooperative. Monthly electricity invoice. Amount due: 84.20. Please pay by October 1, 2026.",
+    "current_metadata": {
+      "document_type_id": null,
+      "tag_ids": [9]
+    },
+    "taxonomy": {
+      "document_types": [
+        {"id": 1, "name": "Invoice"},
+        {"id": 2, "name": "Letter"}
+      ],
+      "classifiable_tags": [
+        {"id": 10, "name": "utilities", "description": "Documents about household utility services."},
+        {"id": 11, "name": "electricity", "description": "Documents about electricity supply or usage."}
+      ],
+      "excluded_control_tags": [
+        {"id": 9, "name": "inbox"}
+      ]
+    }
+  },
+  "illustrative_model_decisions": {
+    "document_type": {
+      "choice": "type_1",
+      "probabilities": {"type_1": 0.97, "type_2": 0.01, "unknown": 0.02}
+    },
+    "tags": [
+      {"tag_id": 10, "noul": 0.98},
+      {"tag_id": 11, "noul": 0.96}
+    ]
+  },
+  "proposal": {
+    "document_type_id": 1,
+    "add_tag_ids": [10, 11],
+    "remove_tag_ids": [],
+    "disposition": "review_required",
+    "reason_code": "automatic_mode_disabled",
+    "applied": false
+  }
+}
