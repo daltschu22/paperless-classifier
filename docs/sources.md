@@ -25,5 +25,6 @@ server version before integration, particularly asynchronous task behavior and
 any conditional-update support.
 
 Homelab context came from `home-ansible`'s Paperless and tag-expansion documentation.
-This task did not inspect live Paperless documents, run a model evaluation, change
-existing services, or establish performance/cost claims.
+The initial planning pass did not inspect live Paperless documents or run a model
+evaluation. Subsequent measured results and read-only inventory observations are
+recorded in [the preliminary investigation](investigation-2026-09-17.md).

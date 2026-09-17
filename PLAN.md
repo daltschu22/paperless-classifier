@@ -1,7 +1,10 @@
 # Implementation plan
 
-Status: planning baseline, 2026-09-17. Only milestone 0 is complete.
+Status: updated after the preliminary synthetic investigation, 2026-09-17.
+Milestone 0 is complete; a research harness proves part of milestone 1.
 Future CLI commands, routes, and modules described here are design targets.
+
+See [the investigation](docs/investigation-2026-09-17.md) for measurements.
 
 ## 0. Establish the project — complete
 
@@ -23,10 +26,10 @@ version and model identity. Lock dependencies after confirming current SDK behav
 
 Acceptance checks:
 
-- [ ] A synthetic invoice produces type and multiple tag suggestions end to end.
+- [x] A synthetic invoice produces type and multiple tag suggestions end to end.
 - [ ] Mocked Paperless tests cover pagination, authentication failures, deleted
   taxonomy entries, and missing OCR.
-- [ ] Unit tests prove that the adapter uses Choice for one type and independent
+- [x] Unit tests prove that the request builder uses Choice for one type and independent
   Noul questions for tags, without treating tags as mutually exclusive.
 - [ ] Missing answers, invalid probabilities, oversized inputs, and provider
   failures produce actionable failures rather than successful empty proposals.
@@ -41,6 +44,10 @@ Create a private, human-reviewed pilot of roughly 100–200 documents, stratifie
 across common types, uncommon tags, overlapping tags, poor scans, unknown types,
 and documents where no tag applies. Include difficult cases deliberately.
 Existing Paperless labels are candidate labels to verify, not unquestioned truth.
+
+The initial live inventory has only 47 documents. Begin with a calibration sample
+and a separate held-out portion of that collection; accumulate later documents
+toward the larger target. Do not substitute synthetic successes for real validation.
 
 Separate calibration and held-out evaluation documents. Group duplicates and
 closely related template families to avoid leakage between the two sets. Hide
@@ -135,6 +142,8 @@ Deliverable: a small service that runs reliably and can be disabled independentl
 
 ## Immediate next work
 
-Implement milestone 1 in this repository. It needs no homelab deployment changes.
-Real-data validation will need a Paperless token and TypeSafe API key, supplied
-outside git. This planning task has not fetched private documents or called Jev.
+Finish milestone 1 by implementing the read-only Paperless client, proposal
+contract, input limits, and integration failure tests. Credentials have been
+verified and remain outside git. The investigation used synthetic Jev inputs
+and read-only Paperless inventory inspection; real document classification and
+write-back are still untested. No homelab deployment changes are needed for this step.

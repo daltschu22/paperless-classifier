@@ -1,6 +1,6 @@
 # Working in this repository
 
-Paperless Classifier is currently a planning repository. Read README.md,
+Paperless Classifier currently contains a plan and a synthetic API research harness. Read README.md,
 OUTLINE.md, PLAN.md, and docs/architecture.md before implementation. Keep completed
 features distinct from planned behavior, and update milestone status with evidence.
 
@@ -13,10 +13,11 @@ features distinct from planned behavior, and update milestone status with eviden
 - Exercise external services through mocks in ordinary tests. Integration runs
   should identify their dataset and any permitted writes explicitly.
 - Review tracked and untracked changes and check for secrets before committing.
-- Run checks appropriate to changed behavior. During this documentation-only
-  phase, check Markdown links, example JSON, and `git diff --check`.
-- When application code is added, provide one local check entrypoint and CI
-  that runs the same checks; include meaningful failure and recovery tests.
+- Run `./check` before committing; it also runs in CI without network access.
+  Check local Markdown links when changing documentation. Extend the shared
+  entrypoint with meaningful failure and recovery tests as application code lands.
+- Live experiments require the harness's explicit `--execute` flag and a private
+  output path. Preserve model, dataset, usage, and run provenance in reports.
 - Keep deployment automation in home-ansible and follow its canonical checkout,
   Quadlet, documentation generation, and validation conventions there.
 
