@@ -93,7 +93,7 @@ class FakeGenerative:
         self.vision_calls=0
 
     def enrich(self,text,taxonomy):
-        return {"title":"Solar installation invoice","new_tags":[copy.deepcopy(NEW_TAG)]},{"model":"synthetic-generator","input_tokens":50,"output_tokens":20,"seconds":.01}
+        return {"text_readable":True,"title":"Solar installation invoice","new_tags":[copy.deepcopy(NEW_TAG)]},{"model":"synthetic-generator","input_tokens":50,"output_tokens":20,"seconds":.01}
 
     def vision(self,data,mime):
         self.vision_calls+=1
@@ -157,6 +157,29 @@ class ServiceTests(unittest.TestCase):
         self.paperless.doc["content"]=""
         job=self.classify(vision_fallback=False)
         self.assertEqual(job["error_code"],"ocr_missing")
+        self.assertEqual(self.jev.calls,0)
+
+    def test_garbled_long_ocr_uses_readability_gate_and_vision(self):
+        good=self.generative.enrich(TEXT,{})
+        self.generative.enrich=Mock(side_effect=[({"text_readable":False,"title":"","new_tags":[]},good[1]),good])
+        job=self.classify()
+        self.assertEqual(job["proposal"]["source"],"vision")
+        self.assertEqual(self.generative.vision_calls,1)
+        self.assertEqual(self.generative.enrich.call_count,2)
+        self.assertEqual(self.jev.calls,1)
+        self.assertEqual(self.paperless.writes,[])
+
+    def test_garbled_ocr_without_vision_is_a_visible_error(self):
+        self.generative.enrich=Mock(return_value=({"text_readable":False,"title":"","new_tags":[]},{}))
+        job=self.classify(vision_fallback=False)
+        self.assertEqual(job["error_code"],"ocr_unreliable")
+        self.assertEqual(self.jev.calls,0)
+
+    def test_unreadable_vision_does_not_continue_to_classification(self):
+        self.paperless.doc["content"]=""
+        self.generative.vision=Mock(return_value=({"text":"[illegible]","legible":False},{}))
+        job=self.classify()
+        self.assertEqual(job["error_code"],"scan_unreadable")
         self.assertEqual(self.jev.calls,0)
 
     def test_apply_preserves_concurrently_added_tags(self):

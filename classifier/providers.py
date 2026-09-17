@@ -80,6 +80,12 @@ class Generative:
 
     def enrich(self, text, taxonomy):
         instructions = (
+            "First assess OCR quality, independently of whether you can guess the document type. "
+            "Set text_readable true only when most text is coherent and there is no substantial corruption. "
+            "Set it false when substantial sections contain garbled words, broken fragments, or mangled labels/values, EVEN IF other sections reveal a clear document type. "
+            "Recognizable amounts, names, or a tax/invoice heading do not compensate for visibly corrupted surrounding text. "
+            "Ordinary line breaks, structured tables, and well-formed reference numbers alone are not corruption. "
+            "If it is not readable, return an empty title and new_tags list. "
             "Suggest a concise factual document title. Do not include full account numbers or other unnecessary sensitive identifiers. "
             "Suggest zero to three reusable tags ONLY for central subjects missing from the existing taxonomy. "
             "Existing broad tags may cover part of the document while a useful specific subject remains uncovered. "
