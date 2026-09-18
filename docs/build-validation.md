@@ -21,3 +21,11 @@ The limited rollout is live at <https://classifier.daltschu.com/>. The full home
 One selected real archive document produced a review proposal with 52 eligible existing tags scored. The original OCR contained substantial corruption despite exceeding the length heuristic. A follow-up readability gate detected that corruption and exercised the complete fallback on the real original: quality assessment → vision → enrichment → Jev. The calls took 4.062, 18.193, 1.661, and 0.779 seconds respectively. The vision transcription was retained only in the private proposal/cache, not written back to Paperless.
 
 Before/after metadata comparisons confirmed zero metadata changes to that existing document. Intake remains disabled. This is a functional pilot, not a labeled accuracy evaluation. Real write behavior has synthetic integration coverage; no existing archive documents were used as write-test fixtures.
+
+## Provider error handling — 2026-09-18
+
+A reported scan failed after the vision provider returned an incomplete, content-filtered response containing unfinished JSON. The SDK raised a validation error before the app could inspect completion status, producing a misleading credentials/availability message. The adapter now checks status and refusal before parsing; incomplete text never becomes a classification proposal. The provider did not disclose the reason for filtering.
+
+Six added offline tests cover filtered and token-limited partial JSON, explicit refusal, invalid completed output, timeout, successful parsing/usage, and the service boundary that prevents classification or writes after a filtered scan. Fixtures are synthetic and use the actual SDK over a mocked HTTP transport. See OpenAI's [structured-output edge cases](https://developers.openai.com/api/docs/guides/structured-outputs#step-3-handle-edge-cases).
+
+The diagnostic dataset was one user-reported document; only private reports and an isolated diagnostic database were written. Credentials, provider responses, document content, and private evaluation artifacts remain outside git. No Paperless document metadata was changed.

@@ -24,7 +24,7 @@ A generative call optionally proposes a title and zero to three missing tags. Su
 
 OCR with fewer than 60 alphanumeric characters, or a high replacement-character ratio, triggers vision when enabled. When enrichment is enabled, its readability assessment also triggers vision for substantially garbled text that passes those simple checks. If vision is disabled, unreadable text becomes an explicit review error. Jev-only mode has the inexpensive text heuristic; a reviewer can explicitly request vision for other poor scans. PDFs and multipage images are rendered locally and all pages are supplied in order. Limits: eight pages, 20 MiB downloaded originals, 60,000 text characters, and a conservative 110,000-byte serialized Jev request. Oversized inputs fail visibly; input is never silently truncated. The UI stores/shows at most 8,000 characters of source excerpt.
 
-Vision and enrichment use structured output with `store=False`. Document content is untrusted data and receives no tools. Provider errors are reduced to safe status messages; raw documents, credentials, and upstream error bodies are not logged.
+Vision and enrichment use structured output with `store=False`. The provider's completion status is checked before the SDK parses structured text: an unfinished JSON object must not hide a content-filter stop or output limit. Filtered/refused responses, output limits, malformed results, and timeouts have distinct safe errors. Partial or refused results never reach Jev or the writer, and they are not automatically replayed. Document content is untrusted data and receives no tools. Raw documents, credentials, and upstream error bodies are not logged.
 
 ## State and proposals
 

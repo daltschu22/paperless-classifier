@@ -17,6 +17,9 @@ For restore: stop the service, retain the existing data directory as a recovery 
 - **No OCR / unreadable scan:** use Read with vision or inspect the original in Paperless.
 - **Input too large:** process in Paperless/manual review; this release does not silently trim content or select only some pages.
 - **Provider unavailable:** retry explicitly. The app does not create an endless paid retry loop.
+- **Provider content filter / refusal:** review the original in Paperless. The app does not use the partial transcription or automatically repeat the request. This does not indicate invalid credentials.
+- **Provider output limit:** the response ended before the result was complete; review the original in Paperless. Partial text is not classified.
+- **Invalid structured result / timeout:** retry explicitly or inspect the original. These errors are distinct from authentication/configuration failures.
 - **Stale document or taxonomy:** close the failed proposal without undo, then classify the document again against current state.
 - **Pending or interrupted application:** reconcile approved changes. The app reads actual state before repeating writes.
 - **Duplicate tag name:** resolve normalized-name duplicates in Paperless, then reconcile.
