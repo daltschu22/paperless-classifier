@@ -182,6 +182,16 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(job["error_code"],"scan_unreadable")
         self.assertEqual(self.jev.calls,0)
 
+    def test_filtered_vision_stops_before_classification_or_paperless_writes(self):
+        self.paperless.doc["content"]=""
+        self.generative.vision=Mock(side_effect=AppError("generative_filtered","Review the original document in Paperless."))
+        job=self.classify()
+        self.assertEqual(job["status"],"error")
+        self.assertEqual(job["error_code"],"generative_filtered")
+        self.assertIsNone(job["proposal"])
+        self.assertEqual(self.jev.calls,0)
+        self.assertEqual(self.paperless.writes,[])
+
     def test_apply_preserves_concurrently_added_tags(self):
         job=self.classify()
         self.paperless.doc["tags"].append(99)
@@ -374,7 +384,8 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(error.exception.code,"page_limit")
 
     def test_generative_incomplete_is_not_a_successful_empty_result(self):
-        client=Mock();client.responses.parse.return_value=Mock(output_parsed=None,status="incomplete")
+        client=Mock()
+        client.responses.with_raw_response.parse.return_value.http_response.json.return_value={"status":"incomplete"}
         with self.assertRaises(AppError) as error:Generative(self.settings,client).enrich(TEXT,{"tags":[]})
         self.assertEqual(error.exception.code,"generative_incomplete")
 
