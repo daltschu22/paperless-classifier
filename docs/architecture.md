@@ -44,6 +44,8 @@ New tags are matched by normalized live name before creation. A timeout after cr
 
 A restart turns interrupted inference into an explicit retry and interrupted application into an explicit reconciliation task. Reconciliation revalidates approved intent and current state. A failed proposal can be closed without undoing completed changes; this retains the journal and observed metadata, permitting a fresh classification. Late asynchronous additions can still finish. There is no transactional write across Paperless endpoints and no atomic compare-and-swap against another writer; avoid concurrent metadata automation for the same documents.
 
+Queue removal uses conditional status transitions into history, preserving proposals and approvals. Waiting writes can be canceled only before the writer claims them; active writes cannot be dismissed. Inference checks the current job before and after provider calls, so a removed job stops at the next boundary and cannot overwrite a newly queued job or return to review. A provider request already in progress is not forcibly interrupted. Removing an application error uses the existing close-without-undo flow and preserves observed metadata.
+
 Intake is disabled by default. Enabled intake polls a selected tag once a minute, enqueues at most ten new documents per poll, and caps the processing backlog at 50. Removing the queue tag prevents later processing/application. The tag is retained after completion, and persisted input fingerprints prevent loops. A paused worker finishes its current operation but schedules/processes no new work.
 
 ## Deployment

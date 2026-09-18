@@ -54,7 +54,19 @@ class Service:
                     if not t.get("is_inbox_tag") and t["id"] != queue_id
                     and tag_key(t["name"]) not in CONTROL_TAGS and not tag_key(t["name"]).startswith("paperless-gpt")]}
 
+    def _require_classifying(self, job):
+        current = self.store.get(job["id"])
+        if not current or current["status"] != "running":
+            raise AppError("classification_removed", "This item was removed from the classification queue.")
+
+    def _classification_call(self, job, operation, *args):
+        self._require_classifying(job)
+        result = operation(*args)
+        self._require_classifying(job)
+        return result
+
     def process(self, job):
+        self._require_classifying(job)
         document = self.paperless.document(job["document_id"])
         self.document_titles[job["document_id"]] = (time.monotonic() + 60, document.get("title", ""))
         queue_tag = job["options"].get("queue_tag_id")
@@ -73,7 +85,7 @@ class Service:
             weak = len([c for c in text if c.isalnum()]) < 60 or text.count("\ufffd") > max(5, len(text) / 20)
             if options.force_vision or (weak and options.vision_fallback):
                 data, mime = self.paperless.file(document["id"])
-                vision, cost = self.generative.vision(data, mime)
+                vision, cost = self._classification_call(job, self.generative.vision, data, mime)
                 usage.append({"provider": "vision", **cost})
                 if not vision["legible"] or not vision["text"].strip():
                     raise AppError("scan_unreadable", "The scan is not readable enough to classify. Review the original in Paperless.")
@@ -84,23 +96,23 @@ class Service:
                 raise AppError("input_too_large", "The document exceeds the 60,000-character processing limit.")
             enriched = {"title": "", "new_tags": []}
             if options.enrich:
-                enriched, cost = self.generative.enrich(text, taxonomy)
+                enriched, cost = self._classification_call(job, self.generative.enrich, text, taxonomy)
                 usage.append({"provider": "generative", **cost})
                 if not enriched["text_readable"] and source == "paperless_ocr" and options.vision_fallback:
                     data, mime = self.paperless.file(document["id"])
-                    vision, cost = self.generative.vision(data, mime)
+                    vision, cost = self._classification_call(job, self.generative.vision, data, mime)
                     usage.append({"provider": "vision", **cost})
                     if not vision["legible"] or not vision["text"].strip():
                         raise AppError("scan_unreadable", "The original scan is not readable enough to classify.")
                     text, source = vision["text"], "vision"
                     if len(text) > self.settings.max_characters:
                         raise AppError("input_too_large", "Vision text exceeds the processing limit.")
-                    enriched, cost = self.generative.enrich(text, taxonomy)
+                    enriched, cost = self._classification_call(job, self.generative.enrich, text, taxonomy)
                     usage.append({"provider": "generative", **cost})
                 if not enriched["text_readable"]:
                     raise AppError("ocr_unreliable", "The document text is too garbled to classify. Read the original with vision or review it in Paperless.")
                 enriched = clean_suggestions(enriched, taxonomy, text)
-            answers, cost = self.jev.classify(text, taxonomy, enriched["new_tags"])
+            answers, cost = self._classification_call(job, self.jev.classify, text, taxonomy, enriched["new_tags"])
             usage.append({"provider": "jev", **cost})
             tag_matches = [{**tag, "probability": answers["tag_" + str(tag["id"])]["noul"]} for tag in taxonomy["tags"]]
             new_tags = [{**tag, "probability": answers["new_" + str(i)]["noul"]} for i, tag in enumerate(enriched["new_tags"])]

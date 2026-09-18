@@ -11,6 +11,7 @@ A working, self-hosted review app for Paperless-ngx, powered by TypeSafe Jev and
 - Suggest titles and up to three new tags with supporting document quotes. Jev independently scores the new tags; they start unchecked during review.
 - Read PDF/image pages with vision when needed, or explicitly retry with vision.
 - Review, edit, apply, dismiss, or defer proposals. Existing tags are preserved.
+- Remove queued, running, ready, or failed items directly from the queue; entries remain in History and documents stay in Paperless.
 - Persist jobs, inference cache, approved changes, and an operation journal in SQLite.
 - Reconcile interrupted writes against actual Paperless state before reporting success.
 - Optionally watch a dedicated intake tag. Automatic intake prepares proposals; it does not approve them.
@@ -56,7 +57,7 @@ The homelab deployment is managed separately in `home-ansible` using Podman Quad
 .venv/bin/python tools/browser_smoke.py --screenshots private/browser-smoke
 ```
 
-The shared check runs 49 offline tests and the original research harness dry runs. Tests cover authentication, CSRF, independent tag classification, caching, stale approvals, preserved tags, new-tag deduplication, uncertain writes, restart recovery, input limits, document names on failed/queued jobs, and incomplete/refused/malformed generative responses. The browser smoke checks login, review, new-tag approval, application, history, settings, mobile layout, and document names after a failed classification and page reload. Live provider smoke checks used synthetic text and a synthetic scan; see [build validation](docs/build-validation.md).
+The shared check runs 55 offline tests and the original research harness dry runs. Tests cover authentication, CSRF, independent tag classification, caching, stale approvals, preserved tags, new-tag deduplication, uncertain writes, restart recovery, input limits, document names on failed/queued jobs, queue-removal races, and incomplete/refused/malformed generative responses. The browser smoke checks login, review, new-tag approval, application, history, settings, mobile layout, document names, queue removal, and queue counts. Live provider smoke checks used synthetic text and a synthetic scan; see [build validation](docs/build-validation.md).
 
 ## Read more
 

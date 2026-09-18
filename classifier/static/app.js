@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
-const labels = {queued:"Queued",running:"Classifying",review:"Ready to review",deferred:"Saved for later",apply_queued:"Approved · queued",applying:"Applying",applied:"Applied",error:"Needs attention",apply_error:"Check application",rejected:"Dismissed",abandoned:"Closed after error"};
+const labels = {queued:"Queued",running:"Classifying",review:"Ready to review",deferred:"Saved for later",apply_queued:"Approved · queued",applying:"Applying",applied:"Applied",error:"Needs attention",apply_error:"Check application",rejected:"Removed from queue",abandoned:"Closed after error"};
 const terminal = new Set(["applied","rejected","abandoned"]);
 let state = {jobs:[]}, taxonomy = {tags:[],types:[]}, documents = [], selected = new Set(), page = 1, query = "", currentView = "library", activeJob = null;
 
@@ -18,6 +18,11 @@ function safely(fn) { return async event => { try { await fn(event); } catch(err
 function badge(status) { return `<span class="badge ${escapeHTML(status)}">${escapeHTML(labels[status] || status)}</span>`; }
 function documentURL(id) { return `${state.paperless_url}/documents/${Number(id)}/details`; }
 function jobTitle(job) { return job.document_title || job.proposal?.before.title || `Document #${job.document_id}`; }
+function removeButton(job) {
+  if(terminal.has(job.status)) return "";
+  return `<button class="small" data-remove="${job.id}" ${job.status==="applying"?'disabled title="Wait for the current changes to finish applying."':`title="${job.status==="apply_error"?"Close this entry in History; existing Paperless changes are kept.":"Move this entry to History. The document stays in Paperless."}"`}>Remove from queue</button>`;
+}
+function removedNotice() { notice("Removed from queue. The document and any existing changes remain in Paperless. The entry is in History."); }
 function jobFor(id) { return state.jobs.find(job=>job.document_id===id); }
 function selection() {
   $("selection-count").textContent=selected.size?`${selected.size} selected · up to 10 at a time`:"Select documents to begin";
@@ -42,10 +47,10 @@ async function loadDocuments() {
 function renderJobs() {
   const reviews=state.jobs.filter(j=>!terminal.has(j.status)), history=state.jobs.filter(j=>terminal.has(j.status));
   const ready=reviews.filter(j=>j.status==="review").length;
-  $("review-count").textContent=ready; $("pending-count").textContent=ready;
+  $("review-count").textContent=reviews.length; $("pending-count").textContent=ready;
   $("applied-count").textContent=history.filter(j=>j.status==="applied").length;
   for (const [id,jobs] of [["review-list",reviews],["history-list",history]]) {
-    $(id).innerHTML=jobs.length?jobs.map(job=>`<article class="job-card"><div>${badge(job.status)}<h3>${escapeHTML(jobTitle(job))}</h3><p>${escapeHTML(job.error || (job.proposal?`${job.proposal.source==="vision"?"Read with vision":"Paperless OCR"} · ${job.proposal.new_tags.length} new tag suggestions${job.proposal.cached?" · cached result":""}`:"Waiting for the worker"))}</p></div><div class="job-actions"><button data-open="${job.id}">${job.status==="review"?"Review proposal":"View details"} →</button><a class="outline-link small" href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Original ↗</a></div></article>`).join(""):`<div class="empty-state"><h2>${id==="review-list"?"All caught up":"Your filing history starts here"}</h2><p class="muted">${id==="review-list"?"Select documents from your library to prepare a proposal.":"Applied and dismissed proposals appear here. The latest 200 jobs are shown."}</p></div>`;
+    $(id).innerHTML=jobs.length?jobs.map(job=>`<article class="job-card"><div>${badge(job.status)}<h3>${escapeHTML(jobTitle(job))}</h3><p>${escapeHTML(job.error || (job.proposal?`${job.proposal.source==="vision"?"Read with vision":"Paperless OCR"} · ${job.proposal.new_tags.length} new tag suggestions${job.proposal.cached?" · cached result":""}`:"Waiting for the worker"))}</p></div><div class="job-actions"><button data-open="${job.id}">${job.status==="review"?"Review proposal":"View details"} →</button><a class="outline-link small" href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Original ↗</a>${removeButton(job)}</div></article>`).join(""):`<div class="empty-state"><h2>${id==="review-list"?"All caught up":"Your filing history starts here"}</h2><p class="muted">${id==="review-list"?"Select documents from your library to prepare a proposal.":"Applied and removed entries appear here. The latest 200 jobs are shown."}</p></div>`;
   }
   $("paused-banner").hidden=!state.paused;
   $("pause-button").textContent=state.paused?"Resume processing":"Pause processing";
@@ -88,8 +93,9 @@ function openJob(id) {
     const currentTags=p.before.tags.map(id=>taxonomy.tags.find(t=>t.id===id)?.name||`#${id}`);
     fields=`<div class="review-grid"><section class="review-source"><div class="split-line"><h3>${p.source==="vision"?"Read with vision":"Document text"}</h3><a href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Open original ↗</a></div><pre>${escapeHTML(p.excerpt)}</pre>${p.excerpt_truncated?'<p class="fine-print">Showing the first 8,000 characters. Classification used the complete text.</p>':""}<details class="technical"><summary>Models & usage${p.cached?" · cached":""}</summary><pre>${escapeHTML(JSON.stringify(p.usage,null,2))}</pre><p>Cached results show usage from the original request.</p></details></section><section class="review-fields">${badge(job.status)}<label>Title<input id="proposal-title" maxlength="160" value="${escapeHTML(p.after?.title||job.approval?.title||p.title||p.before.title)}" ${editable?"":"disabled"}></label><p class="fine-print">Current: ${escapeHTML(p.before.title)}</p><label>Document type<select id="proposal-type" ${editable?"":"disabled"}><option value="">Keep current type</option>${taxonomy.types.map(t=>`<option value="${t.id}" ${(p.after?.document_type||job.approval?.document_type||p.type?.id)===t.id?"selected":""}>${escapeHTML(t.name)}</option>`).join("")}</select></label><p class="fine-print">Current: ${escapeHTML(taxonomy.types.find(t=>t.id===p.before.document_type)?.name||"Unassigned")}${p.type_answer?` · Jev: ${escapeHTML(p.type?.name||"Unknown")}, ${(p.type_answer.confidence*100).toFixed(0)}% provider confidence`:""}</p><h3>Existing tags</h3><p class="fine-print">Already on this document: ${escapeHTML(currentTags.join(", ")||"none")}. These are preserved.</p><div>${renderTagChoices(p,editable,job.approval)}</div><p class="probability-note">Jev relevance scores, not measured accuracy. Scores of 50% or higher are preselected for your review.</p><h3>Suggested new tags</h3><p class="fine-print">Select a suggestion to create and add it. Each suggestion is checked by Jev.</p>${p.new_tags.map((t,i)=>`<div class="new-tag"><label class="tag-choice"><input type="checkbox" name="new-tag" value="${i}" ${job.approval?.new_tag_indices.includes(i)?"checked":""} ${editable?"":"disabled"}>${escapeHTML(t.name)}<span>${(t.probability*100).toFixed(0)}%</span></label><p>${escapeHTML(t.definition)}</p><blockquote>${escapeHTML(t.evidence)}</blockquote></div>`).join("")||'<p class="muted">Your current vocabulary covers this document.</p>'}${job.approval?`<details class="technical"><summary>Approved changes & recorded result</summary><pre>${escapeHTML(JSON.stringify({approved:job.approval,after:p.after||p.observed_after_error||null},null,2))}</pre></details>`:""}</section></div>`;
   } else fields='<div class="review-fields"><p>'+escapeHTML(job.error||"This document is waiting for classification. You can close this window while it processes.")+"</p></div>";
-  if(editable) footer='<button data-action="reject">Dismiss</button><button data-action="defer">Save for later</button><button data-action="vision">Read with vision</button><button id="apply-proposal" class="primary">Apply selected changes</button>';
-  if(job.status==="error") footer='<button data-action="reject">Dismiss</button><button data-action="vision">Read with vision</button><button data-action="retry" class="primary">Retry classification</button>';
+  if(editable) footer='<button data-action="reject">Remove from queue</button><button data-action="defer">Save for later</button><button data-action="vision">Read with vision</button><button id="apply-proposal" class="primary">Apply selected changes</button>';
+  if(["queued","running","apply_queued"].includes(job.status)) footer='<button data-action="reject">Remove from queue</button>';
+  if(job.status==="error") footer='<button data-action="reject">Remove from queue</button><button data-action="vision">Read with vision</button><button data-action="retry" class="primary">Retry classification</button>';
   if(job.status==="apply_error") footer='<button data-action="abandon">Close without undoing changes</button><button data-action="reconcile" class="primary">Reconcile approved changes</button>';
   $("review-content").innerHTML=(job.error?`<p class="dialog-error">${escapeHTML(job.error)}${job.status==="apply_error"?" Changes may already exist in Paperless. Reconcile checks and completes the approved changes; closing keeps any changes already made.":""}</p>`:"")+fields+`<div id="dialog-message" role="alert" class="dialog-error" hidden></div><div class="dialog-footer">${footer||'<button data-action="close">Close</button>'}</div>`;
   if(!$("review-dialog").open) $("review-dialog").showModal();
@@ -100,9 +106,20 @@ async function performAction(action) {
   const body=action==="vision"?{enrich:job.options.enrich,vision_fallback:true,force_vision:true}:{};
   await api(`/api/jobs/${activeJob}/${action==="vision"?"retry":action}`,body);
   $("review-dialog").close(); await refresh();
-  notice(action==="abandon"?"Failed proposal closed. Existing Paperless changes are preserved; you can now classify the document again.":"Proposal updated.");
+  if(["reject","abandon"].includes(action)) removedNotice(); else notice("Proposal updated.");
 }
 document.addEventListener("click",safely(async event=>{
+  const remove=event.target.closest("[data-remove]");
+  if(remove) {
+    if(remove.disabled) return;
+    remove.disabled=true;
+    try {
+      const job=state.jobs.find(j=>j.id===remove.dataset.remove);
+      await api(`/api/jobs/${job.id}/${job.status==="apply_error"?"abandon":"reject"}`,{});
+      await refresh(); removedNotice();
+    } finally {remove.disabled=false;}
+    return;
+  }
   const nav=event.target.closest("[data-view]"); if(nav) setView(nav.dataset.view);
   const open=event.target.closest("[data-open]"); if(open) openJob(open.dataset.open);
 }));
