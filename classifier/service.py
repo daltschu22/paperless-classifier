@@ -18,6 +18,27 @@ class Service:
         self.jev, self.generative = jev, generative
         self.stop = threading.Event()
         self.thread = None
+        self.document_titles = {}
+
+    def jobs(self):
+        jobs = self.store.jobs()
+        visible = {job["document_id"] for job in jobs}
+        for identifier in list(self.document_titles):
+            if identifier not in visible:
+                self.document_titles.pop(identifier, None)
+        for job in jobs:
+            title = (job.get("proposal") or {}).get("before", {}).get("title", "")
+            if not title:
+                identifier = job["document_id"]
+                expires, title = self.document_titles.get(identifier, (0, ""))
+                if expires <= time.monotonic():
+                    try:
+                        title = self.paperless.document(identifier).get("title", "")
+                    except AppError:
+                        pass  # Keep the last known name if Paperless is temporarily unavailable.
+                    self.document_titles[identifier] = (time.monotonic() + 60, title)
+            job["document_title"] = title
+        return jobs
 
     def taxonomy(self):
         value = self.paperless.taxonomy()
@@ -35,6 +56,7 @@ class Service:
 
     def process(self, job):
         document = self.paperless.document(job["document_id"])
+        self.document_titles[job["document_id"]] = (time.monotonic() + 60, document.get("title", ""))
         queue_tag = job["options"].get("queue_tag_id")
         if queue_tag and queue_tag not in document.get("tags", []):
             raise AppError("queue_removed", "Document was removed from the intake queue.")

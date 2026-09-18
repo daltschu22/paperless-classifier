@@ -132,7 +132,7 @@ def create_app(settings=None, service=None, worker_enabled=True):
 
     @app.get("/api/state", dependencies=[Depends(authenticated)])
     def state():
-        jobs = store.jobs()
+        jobs = service.jobs()
         return {"jobs": jobs, "paused": store.setting("paused", False),
                 "intake": store.setting("intake", Intake().model_dump()), "intake_error": store.setting("intake_error"),
                 "generative_ready": bool(settings.openai_key), "paperless_url": settings.paperless_public_url or settings.paperless_url}

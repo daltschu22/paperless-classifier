@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 import httpx
@@ -191,6 +191,47 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNone(job["proposal"])
         self.assertEqual(self.jev.calls,0)
         self.assertEqual(self.paperless.writes,[])
+
+    def test_failed_job_keeps_its_name_before_a_proposal_exists(self):
+        self.paperless.doc["title"]="Example insurance statement"
+        self.generative.enrich=Mock(side_effect=AppError("generative_filtered","Review the original."))
+        job=self.classify()
+        self.assertIsNone(job["proposal"])
+        self.paperless.document=Mock(side_effect=AppError("paperless_connection","Unavailable"))
+        result=self.service.jobs()[0]
+        self.assertEqual(result["document_title"],"Example insurance statement")
+        self.assertEqual(result["status"],"error")
+        self.paperless.document.assert_not_called()
+        self.assertEqual(self.jev.calls,0)
+        self.assertEqual(self.paperless.writes,[])
+
+    def test_queued_and_legacy_failed_jobs_resolve_names_without_inference(self):
+        self.store.enqueue(73,Options().model_dump())
+        old,_=self.store.enqueue(74,Options().model_dump())
+        self.store.change(old["id"],["queued"],"error",error_code="generative_filtered")
+        self.paperless.document=Mock(wraps=self.paperless.document)
+        for _ in range(2):
+            jobs=self.service.jobs()
+            self.assertEqual({job["document_title"] for job in jobs},{"scan"})
+            self.assertEqual({job["status"] for job in jobs},{"queued","error"})
+        self.assertEqual(self.paperless.document.call_count,2)
+        self.assertEqual(self.jev.calls,0)
+        self.assertEqual(self.paperless.writes,[])
+
+    def test_name_lookup_failure_preserves_jobs_and_recovers(self):
+        job,_=self.store.enqueue(73,Options().model_dump())
+        self.store.change(job["id"],["queued"],"error",error_code="generative_filtered")
+        self.paperless.document=Mock(side_effect=AppError("paperless_connection","Unavailable"))
+        with patch("classifier.service.time.monotonic",return_value=100):
+            for _ in range(2):
+                result=self.service.jobs()[0]
+                self.assertEqual(result["document_title"],"")
+                self.assertEqual(result["error_code"],"generative_filtered")
+        self.paperless.document.assert_called_once_with(73)
+        self.paperless.document.side_effect=None
+        self.paperless.document.return_value={"title":"Restored document name"}
+        with patch("classifier.service.time.monotonic",return_value=200):
+            self.assertEqual(self.service.jobs()[0]["document_title"],"Restored document name")
 
     def test_apply_preserves_concurrently_added_tags(self):
         job=self.classify()
