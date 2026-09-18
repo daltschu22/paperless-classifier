@@ -30,6 +30,8 @@ Vision and enrichment use structured output with `store=False`. The provider's c
 
 SQLite contains jobs, cached inference, settings, sessions, tag definitions, intake fingerprints, and operation journals. Each proposal records its input fingerprint, taxonomy snapshot, before metadata, models, usage, latency, source, scores, and cache provenance. Reviewer approval and actual after metadata are distinct records within the job. The operation table stores write intent before network calls and confirmed results afterward.
 
+Job cards and detail headings use the existing Paperless title even before a proposal exists. The worker retains the fetched title before calling providers; the state endpoint resolves names for older failed or queued jobs. These read-only lookups are cached for one minute, including temporary failures, so UI polling does not repeatedly fetch documents. A missing title or unavailable Paperless lookup falls back to the document ID. No inference or document write is needed to display a name.
+
 Cache identity includes Paperless instance, document ID/text/checksum, eligible taxonomy and definitions, requested models, options, and prompt version. Approval checks use fresh Paperless state. Cached usage describes the original call; cache reuse makes no new inference call. Model scores are not measured accuracy.
 
 Sessions contain only random opaque IDs in browser cookies, with hashes and CSRF tokens stored server-side. Password login verifies through Paperless and admits only the account whose API token matches this app's configured token. Direct token login is also supported. All mutations check both exact origin and CSRF (login checks origin); failed login attempts are rate limited per client address.

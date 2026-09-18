@@ -17,6 +17,7 @@ function notice(message, error=false) { $("notice").textContent=message; $("noti
 function safely(fn) { return async event => { try { await fn(event); } catch(error) { notice(error.message,true); } }; }
 function badge(status) { return `<span class="badge ${escapeHTML(status)}">${escapeHTML(labels[status] || status)}</span>`; }
 function documentURL(id) { return `${state.paperless_url}/documents/${Number(id)}/details`; }
+function jobTitle(job) { return job.document_title || job.proposal?.before.title || `Document #${job.document_id}`; }
 function jobFor(id) { return state.jobs.find(job=>job.document_id===id); }
 function selection() {
   $("selection-count").textContent=selected.size?`${selected.size} selected · up to 10 at a time`:"Select documents to begin";
@@ -44,7 +45,7 @@ function renderJobs() {
   $("review-count").textContent=ready; $("pending-count").textContent=ready;
   $("applied-count").textContent=history.filter(j=>j.status==="applied").length;
   for (const [id,jobs] of [["review-list",reviews],["history-list",history]]) {
-    $(id).innerHTML=jobs.length?jobs.map(job=>`<article class="job-card"><div>${badge(job.status)}<h3>${escapeHTML(job.proposal?.before.title || `Document #${job.document_id}`)}</h3><p>${escapeHTML(job.error || (job.proposal?`${job.proposal.source==="vision"?"Read with vision":"Paperless OCR"} · ${job.proposal.new_tags.length} new tag suggestions${job.proposal.cached?" · cached result":""}`:"Waiting for the worker"))}</p></div><div class="job-actions"><button data-open="${job.id}">${job.status==="review"?"Review proposal":"View details"} →</button><a class="outline-link small" href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Original ↗</a></div></article>`).join(""):`<div class="empty-state"><h2>${id==="review-list"?"All caught up":"Your filing history starts here"}</h2><p class="muted">${id==="review-list"?"Select documents from your library to prepare a proposal.":"Applied and dismissed proposals appear here. The latest 200 jobs are shown."}</p></div>`;
+    $(id).innerHTML=jobs.length?jobs.map(job=>`<article class="job-card"><div>${badge(job.status)}<h3>${escapeHTML(jobTitle(job))}</h3><p>${escapeHTML(job.error || (job.proposal?`${job.proposal.source==="vision"?"Read with vision":"Paperless OCR"} · ${job.proposal.new_tags.length} new tag suggestions${job.proposal.cached?" · cached result":""}`:"Waiting for the worker"))}</p></div><div class="job-actions"><button data-open="${job.id}">${job.status==="review"?"Review proposal":"View details"} →</button><a class="outline-link small" href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Original ↗</a></div></article>`).join(""):`<div class="empty-state"><h2>${id==="review-list"?"All caught up":"Your filing history starts here"}</h2><p class="muted">${id==="review-list"?"Select documents from your library to prepare a proposal.":"Applied and dismissed proposals appear here. The latest 200 jobs are shown."}</p></div>`;
   }
   $("paused-banner").hidden=!state.paused;
   $("pause-button").textContent=state.paused?"Resume processing":"Pause processing";
@@ -81,7 +82,7 @@ function renderTagChoices(proposal,editable,approval) {
 function openJob(id) {
   const job=state.jobs.find(j=>j.id===id); if(!job) return;
   activeJob=id; const p=job.proposal, editable=["review","deferred"].includes(job.status);
-  $("review-title").textContent=p?.before.title||`Document #${job.document_id}`;
+  $("review-title").textContent=jobTitle(job);
   let fields="", footer="";
   if(p) {
     const currentTags=p.before.tags.map(id=>taxonomy.tags.find(t=>t.id===id)?.name||`#${id}`);

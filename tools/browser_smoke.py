@@ -71,9 +71,23 @@ def main():
                 expect(page.locator("#notice")).to_have_text("Tag definition saved for future classifications.")
                 page.get_by_role("button",name="Pause processing").click()
                 expect(page.locator("#paused-banner")).to_be_visible()
+                title="Insurance <summary> & coverage"
+                paperless.doc["title"]=title
+                failed,_=service.store.enqueue(73,{"enrich":True,"vision_fallback":True,"force_vision":False})
+                service.store.change(failed["id"],["queued"],"error",error_code="generative_filtered",error="Review the original.")
+                queued,_=service.store.enqueue(74,{"enrich":True,"vision_fallback":True,"force_vision":False})
+                page.reload()
+                expect(page.locator('#documents-body input[data-document="1"]')).to_be_visible()
+                page.locator('[data-view="review"]').click()
+                for job in (failed,queued):
+                    card=page.locator("#review-list article").filter(has=page.locator(f'[data-open="{job["id"]}"]'))
+                    expect(card.locator("h3")).to_have_text(title)
+                    expect(card.locator("h3 summary")).to_have_count(0)
+                page.locator(f'[data-open="{failed["id"]}"]').click()
+                expect(page.locator("#review-title")).to_have_text(title)
                 assert not errors,errors
                 browser.close()
-                print("Browser smoke passed: login, queue, review, new-tag approval, apply, history, definitions, pause, mobile layout; no page errors.")
+                print("Browser smoke passed: login, queue, review, new-tag approval, apply, history, definitions, pause, mobile layout, queued/failed document names after reload; no page errors.")
         finally:
             server.should_exit=True;thread.join(10)
 
