@@ -85,9 +85,23 @@ def main():
                     expect(card.locator("h3 summary")).to_have_count(0)
                 page.locator(f'[data-open="{failed["id"]}"]').click()
                 expect(page.locator("#review-title")).to_have_text(title)
+                page.locator("#close-dialog").click()
+                expect(page.locator("#review-count")).to_have_text("2")
+                expect(page.locator("#pending-count")).to_have_text("0")
+                writes=list(paperless.writes)
+                for remaining,job in zip((1,0),(failed,queued)):
+                    page.locator(f'[data-remove="{job["id"]}"]').click()
+                    expect(page.locator(f'#review-list [data-open="{job["id"]}"]')).to_have_count(0)
+                    expect(page.locator("#review-count")).to_have_text(str(remaining))
+                    expect(page.locator("#notice")).to_contain_text("Removed from queue")
+                    assert service.store.get(job["id"])["status"]=="rejected"
+                page.locator('[data-view="history"]').click()
+                expect(page.locator("#history-list .badge.rejected")).to_have_count(2)
+                assert paperless.writes==writes
+                assert not page.evaluate("document.documentElement.scrollWidth > innerWidth"),"Queue actions overflow mobile viewport"
                 assert not errors,errors
                 browser.close()
-                print("Browser smoke passed: login, queue, review, new-tag approval, apply, history, definitions, pause, mobile layout, queued/failed document names after reload; no page errors.")
+                print("Browser smoke passed: login, queue, review, new-tag approval, apply, history, definitions, pause, mobile layout, document names, queue removal and counts; no page errors.")
         finally:
             server.should_exit=True;thread.join(10)
 

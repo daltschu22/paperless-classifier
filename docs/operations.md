@@ -6,6 +6,8 @@ Run one Uvicorn worker per data directory. `/healthz` checks database access and
 
 The homelab service is `paperless-classifier.service`. Its root-owned environment file is `/opt/services/paperless-classifier/classifier.env`; the database is `/opt/services/paperless-classifier/data/classifier.sqlite3`. Do not print the environment file or include it in diagnostics. Stop or restart with systemd; in-flight jobs become explicit retry/reconciliation entries on startup.
 
+Use **Remove from queue** on a card to move its entry to History. Paperless documents and existing metadata are kept. Select the document again from the library to classify it later. A running provider request may finish, but removal prevents the next inference step and late results cannot put the item back in the queue. Approved changes can be canceled while waiting for the writer; removal is unavailable during an active write. Closing a failed application preserves any partial changes and its audit history. The sidebar badge counts all queue items; the library's review statistic counts only ready proposals.
+
 ## Backups and restore
 
 Use SQLite's online backup API for a live database, not an isolated copy of the main file while WAL is active. The homelab's existing app-backup role discovers SQLite files beneath `/opt`, creates consistent verified snapshots, and includes the classifier automatically. Back up the environment file securely as well. Backups contain document excerpts and session data and must remain private.

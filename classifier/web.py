@@ -171,7 +171,9 @@ def create_app(settings=None, service=None, worker_enabled=True):
         if not job:
             raise AppError("missing_job", "This proposal no longer exists.")
         if action in ("defer", "reject", "restore"):
-            expected = {"defer": ["review", "deferred"], "reject": ["review", "deferred", "error"], "restore": ["deferred"]}[action]
+            expected = {"defer": ["review", "deferred"],
+                        "reject": ["queued", "running", "review", "deferred", "error", "apply_queued"],
+                        "restore": ["deferred"]}[action]
             status = {"defer": "deferred", "reject": "rejected", "restore": "review"}[action]
             success = store.change(identifier, expected, status)
         elif action == "retry":
