@@ -8,6 +8,8 @@ import sqlite3
 import time
 import uuid
 
+from .contracts import digest
+
 
 class Store:
     def __init__(self, directory):
@@ -56,6 +58,7 @@ class Store:
         value = dict(row)
         for key in ("options", "proposal", "approval"):
             value[key] = json.loads(value[key]) if value.get(key) else None
+        value["proposal_revision"] = digest(value["proposal"]) if value["proposal"] else None
         return value
 
     def enqueue(self, document_id, options):
@@ -75,7 +78,24 @@ class Store:
 
     def jobs(self):
         with self.connect() as db:
-            return [self.decode(row) for row in db.execute("SELECT * FROM jobs ORDER BY updated DESC LIMIT 200")]
+            return [self.decode(row) for row in db.execute("""
+                SELECT * FROM jobs WHERE status NOT IN ('applied','rejected','abandoned')
+                OR id IN (SELECT id FROM jobs WHERE status IN ('applied','rejected','abandoned')
+                          ORDER BY updated DESC LIMIT 200)
+                ORDER BY updated DESC
+            """)]
+
+    def approve(self, identifier, revision, approval):
+        # Check the exact proposal under the same transaction as the transition.
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            job = self.decode(db.execute("SELECT * FROM jobs WHERE id=?", (identifier,)).fetchone())
+            if (not job or job["status"] not in ("review", "deferred")
+                    or not revision or job["proposal_revision"] != revision):
+                return False
+            db.execute("UPDATE jobs SET status='apply_queued',approval=?,updated=?,error=NULL,error_code=NULL WHERE id=?",
+                       (json.dumps(approval), time.time(), identifier))
+            return True
 
     def pending_count(self):
         with self.connect() as db:
@@ -129,21 +149,35 @@ class Store:
         with self.connect() as db:
             return {row[0]: row[1] for row in db.execute("SELECT tag_id,definition FROM definitions")}
 
-    def define(self, tag_id, definition):
+    def define(self, tag_id, definition, *, replace=True):
         with self.connect() as db:
-            db.execute("INSERT OR REPLACE INTO definitions VALUES(?,?)", (tag_id, definition))
+            conflict = "REPLACE" if replace else "IGNORE"
+            db.execute(f"INSERT OR {conflict} INTO definitions VALUES(?,?)", (tag_id, definition))
+
+    @staticmethod
+    def decode_operation(row):
+        if row is None:
+            return None
+        value = dict(row)
+        value["payload"] = json.loads(value["payload"])
+        value["result"] = json.loads(value["result"]) if value["result"] else None
+        return value
+
+    def operations(self, job_id):
+        with self.connect() as db:
+            return {row["name"]: self.decode_operation(row) for row in
+                    db.execute("SELECT * FROM operations WHERE job_id=?", (job_id,))}
 
     def operation(self, job_id, name, payload):
         with self.connect() as db:
-            db.execute("INSERT OR IGNORE INTO operations(job_id,name,payload) VALUES(?,?,?)", (job_id, name, json.dumps(payload)))
-            row = dict(db.execute("SELECT * FROM operations WHERE job_id=? AND name=?", (job_id,name)).fetchone())
-            row["payload"] = json.loads(row["payload"])
-            row["result"] = json.loads(row["result"]) if row["result"] else None
+            inserted = db.execute("INSERT OR IGNORE INTO operations(job_id,name,payload) VALUES(?,?,?)", (job_id, name, json.dumps(payload))).rowcount
+            row = self.decode_operation(db.execute("SELECT * FROM operations WHERE job_id=? AND name=?", (job_id,name)).fetchone())
+            row["new"] = bool(inserted)
             return row
 
     def finish_operation(self, job_id, name, result, complete=True):
         with self.connect() as db:
-            db.execute("UPDATE operations SET result=?,complete=? WHERE job_id=? AND name=?", (json.dumps(result), int(complete), job_id, name))
+            db.execute("UPDATE operations SET result=?,complete=? WHERE job_id=? AND name=? AND complete=0", (json.dumps(result), int(complete), job_id, name))
 
     def seen(self, document_id, fingerprint=None):
         with self.connect() as db:

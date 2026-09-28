@@ -1,6 +1,6 @@
 # Implementation plan and status
 
-Updated 2026-09-17. The initial planning repository is now a working hybrid classifier application.
+Updated 2026-09-27. The initial planning repository is now a working hybrid classifier application.
 
 ## Completed
 
@@ -14,6 +14,10 @@ Updated 2026-09-17. The initial planning repository is now a working hybrid clas
 - [x] One-worker lock, persistent restart recovery, optional intake, pause control, health endpoint, and non-root container packaging.
 - [x] Offline failure/recovery tests and synthetic end-to-end browser checks.
 - [x] Live synthetic Jev, generative title/new-tag, and vision API checks.
+- [x] First-principles review fixes: atomic proposal-bound approvals, durable confirmed write identities, preserved curated definitions, all active jobs visible, and the poor-OCR gate in Jev-only mode.
+- [x] Open-ended discovery without taxonomy input, explicit Jev synonym matching, visible reviewer overrides, new-tag renaming, and existing-tag reuse. New matching behavior has synthetic offline coverage; live quality remains unmeasured.
+
+Evidence for the review fixes and discovery milestone is recorded in [build validation](docs/build-validation.md). Earlier live checks predate the discovery/matching change.
 
 The UI and writer shipped together because the requested scope became a complete application. The original CLI-first sequence was a planning proposal; the web queue now provides the selection and proposal workflow.
 
@@ -25,7 +29,7 @@ Use the canonical `home-ansible` checkout for the limited docker-server deployme
 
 1. **Private evaluation:** curate real archive labels, separate calibration and held-out documents, and compare predictions with Paperless matching. No automatic application before an evaluated policy exists.
 2. **Writer integration coverage:** add an isolated Paperless staging instance to CI, including delayed bulk tasks and update-triggered workflows. Current ordinary tests exercise a synthetic Paperless adapter.
-3. **Higher-volume operation:** paginated history beyond the latest 200 jobs, configurable spending limits, exponential retry scheduling, cache retention, and operator metrics. Current jobs require explicit retry and the processing backlog is capped at 50.
+3. **Higher-volume operation:** paginated history beyond the latest 200 terminal entries, configurable spending limits, exponential retry scheduling, cache retention, and operator metrics. All active jobs remain visible. Current jobs require explicit retry and the processing backlog is capped at 50.
 4. **Richer filing:** correspondent selection, longer-document handling, and more precise candidate descriptions.
 5. **Reviewed reversal:** construct a new proposal from attributable changes, with fresh conflict checks. Current history supports inspection and manual correction in Paperless; it does not offer undo.
 

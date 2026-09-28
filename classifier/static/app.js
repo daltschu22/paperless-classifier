@@ -4,7 +4,7 @@ const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const labels = {queued:"Queued",running:"Classifying",review:"Ready to review",deferred:"Saved for later",apply_queued:"Approved · queued",applying:"Applying",applied:"Applied",error:"Needs attention",apply_error:"Check application",rejected:"Removed from queue",abandoned:"Closed after error"};
 const terminal = new Set(["applied","rejected","abandoned"]);
-let state = {jobs:[]}, taxonomy = {tags:[],types:[]}, documents = [], selected = new Set(), page = 1, query = "", currentView = "library", activeJob = null;
+let state = {jobs:[]}, taxonomy = {tags:[],types:[]}, documents = [], selected = new Set(), page = 1, query = "", currentView = "library", activeJob = null, activeRevision = null;
 
 async function api(path, body) {
   const response = await fetch(path, body === undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:JSON.stringify(body)});
@@ -50,7 +50,7 @@ function renderJobs() {
   $("review-count").textContent=reviews.length; $("pending-count").textContent=ready;
   $("applied-count").textContent=history.filter(j=>j.status==="applied").length;
   for (const [id,jobs] of [["review-list",reviews],["history-list",history]]) {
-    $(id).innerHTML=jobs.length?jobs.map(job=>`<article class="job-card"><div>${badge(job.status)}<h3>${escapeHTML(jobTitle(job))}</h3><p>${escapeHTML(job.error || (job.proposal?`${job.proposal.source==="vision"?"Read with vision":"Paperless OCR"} · ${job.proposal.new_tags.length} new tag suggestions${job.proposal.cached?" · cached result":""}`:"Waiting for the worker"))}</p></div><div class="job-actions"><button data-open="${job.id}">${job.status==="review"?"Review proposal":"View details"} →</button><a class="outline-link small" href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Original ↗</a>${removeButton(job)}</div></article>`).join(""):`<div class="empty-state"><h2>${id==="review-list"?"All caught up":"Your filing history starts here"}</h2><p class="muted">${id==="review-list"?"Select documents from your library to prepare a proposal.":"Applied and removed entries appear here. The latest 200 jobs are shown."}</p></div>`;
+    $(id).innerHTML=jobs.length?jobs.map(job=>`<article class="job-card"><div>${badge(job.status)}<h3>${escapeHTML(jobTitle(job))}</h3><p>${escapeHTML(job.error || (job.proposal?`${job.proposal.source==="vision"?"Read with vision":"Paperless OCR"} · ${job.proposal.new_tags.length} new tag suggestions${job.proposal.cached?" · cached result":""}`:"Waiting for the worker"))}</p></div><div class="job-actions"><button data-open="${job.id}">${job.status==="review"?"Review proposal":"View details"} →</button><a class="outline-link small" href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Original ↗</a>${removeButton(job)}</div></article>`).join(""):`<div class="empty-state"><h2>${id==="review-list"?"All caught up":"Your filing history starts here"}</h2><p class="muted">${id==="review-list"?"Select documents from your library to prepare a proposal.":"Applied and removed entries appear here. The latest 200 history entries are shown. All active jobs remain in the queue."}</p></div>`;
   }
   $("paused-banner").hidden=!state.paused;
   $("pause-button").textContent=state.paused?"Resume processing":"Pause processing";
@@ -84,14 +84,27 @@ function renderTagChoices(proposal,editable,approval) {
   const main=proposal.tags.filter(relevant), rest=proposal.tags.filter(t=>!relevant(t));
   return (main.map(choice).join("")||'<p class="muted">No likely matches.</p>')+(rest.length?`<details class="technical"><summary>Other tag scores (${rest.length})</summary>${rest.map(choice).join("")}</details>`:"");
 }
+function renderSubjects(proposal,editable,approval) {
+  const subjects=proposal.subjects||proposal.new_tags;
+  if(!subjects.length) return '<p class="muted">No additional filing subjects were suggested.</p>';
+  return subjects.map((subject,i)=>{
+    const choice=approval?.subject_choices?.find(c=>c.index===i);
+    const approved=approval?.selected_new_tags?.find(c=>c.index===i);
+    const legacyIndex=proposal.new_tags.findIndex((s,index)=>(s.subject_index??index)===i);
+    const checked=!!choice||!!approved||!!approval?.new_tag_indices?.includes(legacyIndex);
+    const target=choice?choice.existing_tag_id:(subject.existing_tag_id??null);
+    const match=proposal.taxonomy.tags.find(t=>t.id===subject.existing_tag_id);
+    return `<div class="new-tag"><label class="tag-choice"><input type="checkbox" name="new-tag" value="${i}" ${checked?"checked":""} ${editable?"":"disabled"}>${escapeHTML(subject.name)}<span>${(subject.probability*100).toFixed(0)}%</span></label><p>${escapeHTML(subject.definition)}</p><blockquote>${escapeHTML(subject.evidence)}</blockquote><p class="fine-print">${match?`Suggested equivalent: ${escapeHTML(match.name)}. You can change this match.`:"No equivalent existing tag was suggested."}</p><label>Use subject as<select data-subject-target="${i}" ${editable?"":"disabled"}><option value="">Create a new tag</option>${proposal.taxonomy.tags.map(t=>`<option value="${t.id}" ${target===t.id?"selected":""}>Reuse ${escapeHTML(t.name)}</option>`).join("")}</select></label><label>New tag name<input data-subject-name="${i}" maxlength="80" value="${escapeHTML(approved?.name||choice?.name||subject.name)}" ${editable&&!target?"":"disabled"}></label></div>`;
+  }).join("");
+}
 function openJob(id) {
   const job=state.jobs.find(j=>j.id===id); if(!job) return;
-  activeJob=id; const p=job.proposal, editable=["review","deferred"].includes(job.status);
+  activeJob=id; activeRevision=job.proposal_revision; const p=job.proposal, editable=["review","deferred"].includes(job.status);
   $("review-title").textContent=jobTitle(job);
   let fields="", footer="";
   if(p) {
     const currentTags=p.before.tags.map(id=>taxonomy.tags.find(t=>t.id===id)?.name||`#${id}`);
-    fields=`<div class="review-grid"><section class="review-source"><div class="split-line"><h3>${p.source==="vision"?"Read with vision":"Document text"}</h3><a href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Open original ↗</a></div><pre>${escapeHTML(p.excerpt)}</pre>${p.excerpt_truncated?'<p class="fine-print">Showing the first 8,000 characters. Classification used the complete text.</p>':""}<details class="technical"><summary>Models & usage${p.cached?" · cached":""}</summary><pre>${escapeHTML(JSON.stringify(p.usage,null,2))}</pre><p>Cached results show usage from the original request.</p></details></section><section class="review-fields">${badge(job.status)}<label>Title<input id="proposal-title" maxlength="160" value="${escapeHTML(p.after?.title||job.approval?.title||p.title||p.before.title)}" ${editable?"":"disabled"}></label><p class="fine-print">Current: ${escapeHTML(p.before.title)}</p><label>Document type<select id="proposal-type" ${editable?"":"disabled"}><option value="">Keep current type</option>${taxonomy.types.map(t=>`<option value="${t.id}" ${(p.after?.document_type||job.approval?.document_type||p.type?.id)===t.id?"selected":""}>${escapeHTML(t.name)}</option>`).join("")}</select></label><p class="fine-print">Current: ${escapeHTML(taxonomy.types.find(t=>t.id===p.before.document_type)?.name||"Unassigned")}${p.type_answer?` · Jev: ${escapeHTML(p.type?.name||"Unknown")}, ${(p.type_answer.confidence*100).toFixed(0)}% provider confidence`:""}</p><h3>Existing tags</h3><p class="fine-print">Already on this document: ${escapeHTML(currentTags.join(", ")||"none")}. These are preserved.</p><div>${renderTagChoices(p,editable,job.approval)}</div><p class="probability-note">Jev relevance scores, not measured accuracy. Scores of 50% or higher are preselected for your review.</p><h3>Suggested new tags</h3><p class="fine-print">Select a suggestion to create and add it. Each suggestion is checked by Jev.</p>${p.new_tags.map((t,i)=>`<div class="new-tag"><label class="tag-choice"><input type="checkbox" name="new-tag" value="${i}" ${job.approval?.new_tag_indices.includes(i)?"checked":""} ${editable?"":"disabled"}>${escapeHTML(t.name)}<span>${(t.probability*100).toFixed(0)}%</span></label><p>${escapeHTML(t.definition)}</p><blockquote>${escapeHTML(t.evidence)}</blockquote></div>`).join("")||'<p class="muted">Your current vocabulary covers this document.</p>'}${job.approval?`<details class="technical"><summary>Approved changes & recorded result</summary><pre>${escapeHTML(JSON.stringify({approved:job.approval,after:p.after||p.observed_after_error||null},null,2))}</pre></details>`:""}</section></div>`;
+    fields=`<div class="review-grid"><section class="review-source"><div class="split-line"><h3>${p.source==="vision"?"Read with vision":"Document text"}</h3><a href="${escapeHTML(documentURL(job.document_id))}" target="_blank" rel="noopener">Open original ↗</a></div><pre>${escapeHTML(p.excerpt)}</pre>${p.excerpt_truncated?'<p class="fine-print">Showing the first 8,000 characters. Classification used the complete text.</p>':""}<details class="technical"><summary>Models & usage${p.cached?" · cached":""}</summary><pre>${escapeHTML(JSON.stringify(p.usage,null,2))}</pre><p>Cached results show usage from the original request.</p></details></section><section class="review-fields">${badge(job.status)}<label>Title<input id="proposal-title" maxlength="160" value="${escapeHTML(p.after?.title||job.approval?.title||p.title||p.before.title)}" ${editable?"":"disabled"}></label><p class="fine-print">Current: ${escapeHTML(p.before.title)}</p><label>Document type<select id="proposal-type" ${editable?"":"disabled"}><option value="">Keep current type</option>${p.taxonomy.types.map(t=>`<option value="${t.id}" ${(p.after?.document_type||job.approval?.document_type||p.type?.id)===t.id?"selected":""}>${escapeHTML(t.name)}</option>`).join("")}</select></label><p class="fine-print">Current: ${escapeHTML(taxonomy.types.find(t=>t.id===p.before.document_type)?.name||"Unassigned")}${p.type_answer?` · Jev: ${escapeHTML(p.type?.name||"Unknown")}, ${(p.type_answer.confidence*100).toFixed(0)}% provider confidence`:""}</p><h3>Existing tags</h3><p class="fine-print">Already on this document: ${escapeHTML(currentTags.join(", ")||"none")}. These are preserved.</p><div>${renderTagChoices(p,editable,job.approval)}</div><p class="probability-note">Jev relevance scores, not measured accuracy. Scores of 50% or higher are preselected for your review.</p><h3>Discovered subjects</h3><p class="fine-print">Select subjects to reuse an existing tag or create up to three new tags. You can rename a new tag while keeping its meaning. Scores describe the original subject; selections start unchecked.</p>${renderSubjects(p,editable,job.approval)}${job.approval?`<details class="technical"><summary>Approved changes & recorded result</summary><pre>${escapeHTML(JSON.stringify({approved:job.approval,after:p.after||p.observed_after_error||null},null,2))}</pre></details>`:""}</section></div>`;
   } else fields='<div class="review-fields"><p>'+escapeHTML(job.error||"This document is waiting for classification. You can close this window while it processes.")+"</p></div>";
   if(editable) footer='<button data-action="reject">Remove from queue</button><button data-action="defer">Save for later</button><button data-action="vision">Read with vision</button><button id="apply-proposal" class="primary">Apply selected changes</button>';
   if(["queued","running","apply_queued"].includes(job.status)) footer='<button data-action="reject">Remove from queue</button>';
@@ -130,12 +143,20 @@ $("review-content").addEventListener("click",async event=>{
     if(button.id==="apply-proposal") {
       const title=$("proposal-title").value.trim(); if(!title) throw new Error("Enter a title before applying.");
       const tag_ids=[...document.querySelectorAll('input[name="tag"]:checked')].map(el=>Number(el.value));
-      const new_tag_indices=[...document.querySelectorAll('input[name="new-tag"]:checked')].map(el=>Number(el.value));
-      await api(`/api/jobs/${activeJob}/apply`,{title,tag_ids,new_tag_indices,document_type:$("proposal-type").value?Number($("proposal-type").value):null});
+      const subject_choices=[...$("review-content").querySelectorAll('input[name="new-tag"]:checked')].map(el=>{
+        const index=Number(el.value), target=$("review-content").querySelector(`[data-subject-target="${index}"]`).value;
+        return target?{index,existing_tag_id:Number(target)}:{index,name:$("review-content").querySelector(`[data-subject-name="${index}"]`).value.trim()};
+      });
+      await api(`/api/jobs/${activeJob}/apply`,{proposal_revision:activeRevision,title,tag_ids,subject_choices,document_type:$("proposal-type").value?Number($("proposal-type").value):null});
       $("review-dialog").close(); await refresh(); notice("Approved changes are queued. Completion will appear in History.");
     } else if(button.dataset.action) await performAction(button.dataset.action);
   } catch(error) { $("dialog-message").textContent=error.message; $("dialog-message").hidden=false; }
   finally { buttons.forEach(b=>b.disabled=false); }
+});
+$("review-content").addEventListener("change",event=>{
+  if(event.target.matches("[data-subject-target]")) {
+    $("review-content").querySelector(`[data-subject-name="${event.target.dataset.subjectTarget}"]`).disabled=!!event.target.value;
+  }
 });
 $("close-dialog").onclick=()=>$("review-dialog").close();
 $("documents-body").addEventListener("change",event=>{

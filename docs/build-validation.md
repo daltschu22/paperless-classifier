@@ -29,3 +29,14 @@ A reported scan failed after the vision provider returned an incomplete, content
 Six added offline tests cover filtered and token-limited partial JSON, explicit refusal, invalid completed output, timeout, successful parsing/usage, and the service boundary that prevents classification or writes after a filtered scan. Fixtures are synthetic and use the actual SDK over a mocked HTTP transport. See OpenAI's [structured-output edge cases](https://developers.openai.com/api/docs/guides/structured-outputs#step-3-handle-edge-cases).
 
 The diagnostic dataset was one user-reported document; only private reports and an isolated diagnostic database were written. Credentials, provider responses, document content, and private evaluation artifacts remain outside git. No Paperless document metadata was changed.
+
+## Review fixes and subject discovery — 2026-09-27
+
+- Shared `./check`: 85 passing offline tests plus both synthetic investigation dry runs.
+- The original five review findings have regression coverage: stale/replaced proposals, atomic approval transitions, confirmed tag IDs and metadata during recovery, active reviews beyond the history limit, preservation of curated definitions, and rejection of weak OCR in Jev-only mode.
+- Older proposals and persisted approvals remain usable without a database migration. Browser approvals now include the revision captured when the review opened; old forms must be reopened after regeneration.
+- Discovery uses the actual Responses SDK over a mocked HTTP transport to verify structured subject output and document-only input. No existing taxonomy is supplied to that call.
+- Synthetic Jev responses exercise exact-name matching, semantic equivalents, distinct subjects alongside high-scoring broad tags, invalid matching answers, taxonomy limits, reviewer overrides, renamed labels, existing-tag reuse, cache provenance, and cancellation during matching.
+- Chromium browser smoke passed at 1440px desktop and 390px mobile, including new-tag renaming, reuse of an existing tag, and an old review tab submitting after a second tab regenerated the proposal. Existing login, apply, history, settings, queue-removal and layout checks also passed, with no page errors.
+
+These checks used synthetic text, adapters, and disposable local databases. They made no live provider calls or Paperless writes. The matching decisions in the tests are simulated: they establish application behavior, not real synonym accuracy or outlier recall. The historical live checks above predate this discovery pipeline; private evaluation and deployment validation of this revision remain outstanding.

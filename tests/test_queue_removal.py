@@ -59,7 +59,7 @@ class QueueRemovalTests(unittest.TestCase):
 
     def test_removal_cancels_approved_changes_before_the_writer_claims_them(self):
         job = self.ready()
-        self.service.approve(job['id'], Approval(title='Approved title', tag_ids=[1]))
+        self.service.approve(job['id'], Approval(proposal_revision=job['proposal_revision'], title='Approved title', tag_ids=[1]))
         self.assertEqual(self.remove(job).status_code, 200)
         self.assertFalse(self.service.step())
         removed = self.store.get(job['id'])
@@ -70,7 +70,7 @@ class QueueRemovalTests(unittest.TestCase):
 
     def test_removal_cannot_interrupt_an_active_writer(self):
         job = self.ready()
-        self.service.approve(job['id'], Approval(title='Approved title'))
+        self.service.approve(job['id'], Approval(proposal_revision=job['proposal_revision'], title='Approved title'))
         self.assertEqual(self.store.claim()['status'], 'applying')
         response = self.remove(job)
         self.assertEqual(response.status_code, 400)
@@ -79,7 +79,7 @@ class QueueRemovalTests(unittest.TestCase):
 
     def test_removal_during_enrichment_stops_jev_and_cannot_replace_a_new_job(self):
         job = self.enqueue()
-        enrich = self.service.generative.enrich
+        enrich = self.service.generative.discover
         replacement = []
 
         def finish_after_removal(*args):
@@ -87,7 +87,7 @@ class QueueRemovalTests(unittest.TestCase):
             replacement.append(self.enqueue())
             return enrich(*args)
 
-        self.service.generative.enrich = Mock(side_effect=finish_after_removal)
+        self.service.generative.discover = Mock(side_effect=finish_after_removal)
         self.service.step()
         self.assertEqual(self.service.jev.calls, 0)
         self.assertEqual(self.store.get(job['id'])['status'], 'rejected')
@@ -121,7 +121,7 @@ class QueueRemovalTests(unittest.TestCase):
     def test_closing_failed_application_keeps_partial_changes_and_audit_history(self):
         job = self.ready()
         self.paperless.fail_after_patch = True
-        self.service.approve(job['id'], Approval(title='Already updated title'))
+        self.service.approve(job['id'], Approval(proposal_revision=job['proposal_revision'], title='Already updated title'))
         self.service.step()
         self.assertEqual(self.store.get(job['id'])['status'], 'apply_error')
         before = copy.deepcopy(self.paperless.doc)

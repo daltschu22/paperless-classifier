@@ -8,12 +8,12 @@ A working, self-hosted review app for Paperless-ngx, powered by TypeSafe Jev and
 
 - Browse and search Paperless; queue up to ten documents at a time.
 - Classify each existing tag independently and choose a document type, with an unknown option.
-- Suggest titles and up to three new tags with supporting document quotes. Jev independently scores the new tags; they start unchecked during review.
+- Suggest titles and discover up to six filing subjects from document text without supplying a fixed vocabulary. Jev suggests equivalent existing tags and independently scores every subject. Reviewers can reuse tags, rename new tags, or leave subjects unchecked; at most three new tags can be created per approval.
 - Read PDF/image pages with vision when needed, or explicitly retry with vision.
 - Review, edit, apply, dismiss, or defer proposals. Existing tags are preserved.
 - Remove queued, running, ready, or failed items directly from the queue; entries remain in History and documents stay in Paperless.
 - Persist jobs, inference cache, approved changes, and an operation journal in SQLite.
-- Reconcile interrupted writes against actual Paperless state before reporting success.
+- Bind approvals to the exact displayed proposal and reconcile interrupted writes against actual Paperless state. Confirmed tag identities and writes are preserved; later conflicting edits require a fresh review.
 - Optionally watch a dedicated intake tag. Automatic intake prepares proposals; it does not approve them.
 
 This is a useful replacement for Paperless-GPT's title/tag/type workflow. It does not replace Paperless OCR, rewrite original files, create searchable PDFs, select correspondents, or automatically apply unreviewed predictions. Paperless-GPT can remain available for its other features.
@@ -35,7 +35,9 @@ Open `http://127.0.0.1:8098`. Sign in using the Paperless account associated wit
 
 Set `APP_ORIGIN` to the exact browser origin, including scheme and port. Behind HTTPS, the app uses a Secure, HttpOnly, SameSite session cookie. Credentials remain on the server. Store the data directory on a local filesystem, not NFS, and run one worker per database.
 
-`OPENAI_API_KEY` enables titles, new tags, and vision through the Responses API. With no generative key, select Jev-only processing. Models default to `jev-1.13.0` and `gpt-5.6-sol`; both are configurable. Selected document text is sent to TypeSafe; enrichment sends text and tag definitions to OpenAI, and vision sends rendered document pages. OpenAI requests use `store=False`.
+`OPENAI_API_KEY` enables titles, subject discovery, and vision through the Responses API. With no generative key, select Jev-only processing. Models default to `jev-1.13.0` and `gpt-5.6-sol`; both are configurable. TypeSafe receives document text for classification and subject/tag definitions for vocabulary matching. Discovery sends document text without the taxonomy to OpenAI; vision sends rendered document pages. OpenAI requests use `store=False`.
+
+Discovery runs for every document with enrichment enabled, even when broad existing tags fit confidently. Equivalent names can reuse existing IDs; broader or narrower concepts remain distinct suggestions. All discovered subjects stay visible so reviewers can correct the suggested matches. Matching is a separate Jev call when subjects lack exact name matches; model quality on the real archive remains unmeasured.
 
 ## Container
 
@@ -57,7 +59,7 @@ The homelab deployment is managed separately in `home-ansible` using Podman Quad
 .venv/bin/python tools/browser_smoke.py --screenshots private/browser-smoke
 ```
 
-The shared check runs 55 offline tests and the original research harness dry runs. Tests cover authentication, CSRF, independent tag classification, caching, stale approvals, preserved tags, new-tag deduplication, uncertain writes, restart recovery, input limits, document names on failed/queued jobs, queue-removal races, and incomplete/refused/malformed generative responses. The browser smoke checks login, review, new-tag approval, application, history, settings, mobile layout, document names, queue removal, and queue counts. Live provider smoke checks used synthetic text and a synthetic scan; see [build validation](docs/build-validation.md).
+The shared check runs offline tests and the original research harness dry runs. Tests cover authentication, CSRF, independent classification, vocabulary matching, reviewer overrides, caching, atomic approval revision checks, preserved tags/definitions, recovery conflicts, active jobs beyond the history limit, poor OCR, queue-removal races, and invalid provider responses. The browser smoke also exercises new-tag renaming, existing-tag reuse, and an old review tab submitting after another tab regenerates the proposal. See [build validation](docs/build-validation.md) for current results and the separate historical live provider checks.
 
 ## Read more
 

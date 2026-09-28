@@ -6,7 +6,7 @@ Paperless Classifier turns consumed documents into reviewable filing suggestions
 | --- | --- |
 | Document type | One existing type, or unknown; changing the type requires approval. |
 | Existing tags | Independent Jev scores for every eligible tag; additions only. |
-| New tags | Up to three generated suggestions, verbatim supporting evidence, independent Jev scores, explicit selection before creation. |
+| Subjects and new tags | Up to six subjects discovered without an existing vocabulary, supporting quotes, suggested equivalent tags, independent Jev relevance scores, and explicit review to reuse, rename, or create up to three new tags. |
 | Titles | Editable factual title suggestions. |
 | Images and scans | Paperless OCR first; a separate vision model reads all pages when needed. |
 | Review | Current metadata, source excerpt, predictions, original document link, and explicit approval. |
@@ -15,7 +15,11 @@ Paperless Classifier turns consumed documents into reviewable filing suggestions
 
 Existing tags are preserved, including inbox/workflow markers. The model cannot choose operational tags, endpoints, tools, or write policy. New tags are normalized and matched against the live taxonomy before creation.
 
+Subject discovery runs whenever enrichment is enabled, including documents that already match broad tags. Jev suggests synonymous existing tags after discovery; broader or narrower meanings should remain distinct. Reviewers see every discovered subject and can override the suggested match. A useful rare subject does not need multiple documents before it can become a tag. Created tags join the vocabulary used on future documents. Existing curated definitions are preserved when tags are reused.
+
 The first release requires review for every write. The 50% tag-score preselection is a UI convenience, not a calibrated accuracy or automatic-application threshold. New tags are never preselected.
+
+Approvals are bound to the displayed proposal revision and store the selected names and IDs. Regenerating a job invalidates older open review forms. All active jobs remain accessible; only terminal history entries are limited to the latest 200.
 
 ## Boundaries
 

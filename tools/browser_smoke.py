@@ -38,7 +38,8 @@ def main():
             else:raise RuntimeError("Test server did not start")
             with sync_playwright() as p:
                 browser=p.chromium.launch()
-                page=browser.new_page(viewport={"width":1440,"height":1000})
+                context=browser.new_context(viewport={"width":1440,"height":1000})
+                page=context.new_page()
                 errors=[];page.on("pageerror",lambda error:errors.append(str(error)))
                 page.goto(origin)
                 page.get_by_label("Username").fill("owner")
@@ -58,19 +59,72 @@ def main():
                 if args.screenshots:page.screenshot(path=str(args.screenshots/"review-mobile.png"),full_page=True)
                 self_overflow=page.evaluate("document.documentElement.scrollWidth > innerWidth")
                 assert not self_overflow,"Mobile page overflows viewport"
+                if args.screenshots:
+                    page.locator('.new-tag').first.scroll_into_view_if_needed()
+                    page.screenshot(path=str(args.screenshots/'subjects-mobile.png'),full_page=True)
                 page.locator('input[name="new-tag"]').check()
+                page.locator('[data-subject-name="0"]').fill("Residential Solar")
                 page.locator("#proposal-title").fill("Reviewed solar invoice")
                 page.get_by_role("button",name="Apply selected changes").click()
                 page.locator('[data-view="history"]').click()
                 expect(page.locator("#history-list .badge.applied")).to_be_visible(timeout=20000)
                 assert paperless.doc["title"]=="Reviewed solar invoice"
                 assert set(paperless.doc["tags"])=={1,2,3,4}
+                assert paperless.tags[-1]['name']=="residential-solar"
                 page.locator('[data-view="settings"]').click()
                 page.locator("#definition-text").fill("Household finance documents")
                 page.get_by_role("button",name="Save definition").click()
                 expect(page.locator("#notice")).to_have_text("Tag definition saved for future classifications.")
                 page.get_by_role("button",name="Pause processing").click()
                 expect(page.locator("#paused-banner")).to_be_visible()
+
+                # Keep one review open while a second tab regenerates the job.
+                # Polling must not replace the revision bound to the open form.
+                review,_=service.store.enqueue(1,{"enrich":True,"vision_fallback":True,"force_vision":False})
+                service.step()
+                page.reload()
+                expect(page.locator('#documents-body input[data-document="1"]')).to_be_visible()
+                page.locator('[data-view="review"]').click()
+                page.locator(f'#review-list [data-open="{review["id"]}"]').click()
+                expect(page.locator('[data-subject-name="0"]')).to_have_value("solar-energy")
+                discovery=service.generative.discover
+
+                def replacement(text):
+                    result,usage=discovery(text)
+                    result['subjects']=[{"name":"home-battery","definition":"Home electricity storage.","evidence":"home battery"}]
+                    return result,usage
+
+                service.generative.discover=replacement
+                other=page.context.new_page()
+                other.goto(origin)
+                expect(other.locator('#documents-body input[data-document="1"]')).to_be_visible()
+                other.evaluate('(id) => api(`/api/jobs/${id}/retry`, {force_vision:true})',review['id'])
+                service.step()
+                page.evaluate('refresh()')
+                page.locator('input[name="new-tag"]').check()
+                page.get_by_role('button',name='Apply selected changes').click()
+                expect(page.locator('#dialog-message')).to_contain_text('This proposal changed')
+                assert service.store.get(review['id'])['status']=='review'
+                assert service.store.get(review['id'])['approval'] is None
+                page.locator('#close-dialog').click()
+                page.locator(f'#review-list [data-open="{review["id"]}"]').click()
+                expect(page.locator('[data-subject-name="0"]')).to_have_value('home-battery')
+                expect(page.locator('input[name="new-tag"]')).not_to_be_checked()
+                page.locator('input[name="new-tag"]').check()
+                page.locator('[data-subject-target="0"]').select_option('2')
+                expect(page.locator('[data-subject-name="0"]')).to_be_disabled()
+                creates=sum(w[0]=='create_tag' for w in paperless.writes)
+                page.get_by_role('button',name='Apply selected changes').click()
+                expect(page.locator('#review-dialog')).not_to_be_visible()
+                service.step()
+                applied=service.store.get(review['id'])
+                assert applied['status']=='applied'
+                assert applied['approval']['selected_new_tags']==[]
+                assert 2 in applied['approval']['tag_ids']
+                assert sum(w[0]=='create_tag' for w in paperless.writes)==creates
+                service.generative.discover=discovery
+                other.close()
+
                 title="Insurance <summary> & coverage"
                 paperless.doc["title"]=title
                 failed,_=service.store.enqueue(73,{"enrich":True,"vision_fallback":True,"force_vision":False})
@@ -101,7 +155,7 @@ def main():
                 assert not page.evaluate("document.documentElement.scrollWidth > innerWidth"),"Queue actions overflow mobile viewport"
                 assert not errors,errors
                 browser.close()
-                print("Browser smoke passed: login, queue, review, new-tag approval, apply, history, definitions, pause, mobile layout, document names, queue removal and counts; no page errors.")
+                print("Browser smoke passed: login, queue, review, new-tag renaming, existing-tag reuse, stale approval across tabs, apply, history, definitions, pause, mobile layout, document names, queue removal and counts; no page errors.")
         finally:
             server.should_exit=True;thread.join(10)
 
