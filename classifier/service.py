@@ -3,13 +3,15 @@ import json
 import logging
 import threading
 import time
+import uuid
 
 from .config import AppError
-from .contracts import Approval, Intake, Options, digest, metadata, tag_key, text_hash
-from .providers import clean_suggestions
+from .contracts import ApprovedChanges, ApprovedTag, Intake, Options, SubjectChoice, digest, metadata, tag_key, text_hash
+from .providers import clean_subjects
 
 log = logging.getLogger("classifier")
 CONTROL_TAGS = {"inbox", "needs-tags", "classifier", "classifier-queue"}
+PROMPT_VERSION = "hybrid-v5-subject-discovery"
 
 
 class Service:
@@ -73,11 +75,15 @@ class Service:
         if queue_tag and queue_tag not in document.get("tags", []):
             raise AppError("queue_removed", "Document was removed from the intake queue.")
         options = Options.model_validate({k:v for k,v in job["options"].items() if k != "queue_tag_id"})
-        taxonomy = self.allowed(self.taxonomy())
+        full_taxonomy = self.taxonomy()
+        taxonomy = self.allowed(full_taxonomy)
+        eligible_ids = {t["id"] for t in taxonomy["tags"]}
+        reserved_names = {tag_key(t["name"]) for t in full_taxonomy["tags"] if t["id"] not in eligible_ids}
         text = document.get("content") or ""
         cache_key = digest({"instance": self.settings.paperless_url, "input": text_hash(document),
             "taxonomy": taxonomy, "options": options.model_dump(), "jev": self.settings.jev_model,
-            "generative": self.settings.generative_model, "prompt": "hybrid-v3-readability"})
+            "generative": self.settings.generative_model, "reserved_names": sorted(reserved_names),
+            "prompt": PROMPT_VERSION})
         analysis = self.store.cache_get(cache_key)
         cached = analysis is not None
         if analysis is None:
@@ -92,12 +98,15 @@ class Service:
                 text, source = vision["text"], "vision"
             if not text.strip():
                 raise AppError("ocr_missing", "No OCR text is available. Retry with vision enabled.")
+            if weak and source == "paperless_ocr":
+                raise AppError("ocr_unreliable", "The document text is too short or corrupted to classify. Read the original with vision or review it in Paperless.")
             if len(text) > self.settings.max_characters:
                 raise AppError("input_too_large", "The document exceeds the 60,000-character processing limit.")
-            enriched = {"title": "", "new_tags": []}
+            enriched = {"title": "", "subjects": []}
+            matches = []
             if options.enrich:
-                enriched, cost = self._classification_call(job, self.generative.enrich, text, taxonomy)
-                usage.append({"provider": "generative", **cost})
+                enriched, cost = self._classification_call(job, self.generative.discover, text)
+                usage.append({"provider": "discovery", **cost})
                 if not enriched["text_readable"] and source == "paperless_ocr" and options.vision_fallback:
                     data, mime = self.paperless.file(document["id"])
                     vision, cost = self._classification_call(job, self.generative.vision, data, mime)
@@ -107,48 +116,99 @@ class Service:
                     text, source = vision["text"], "vision"
                     if len(text) > self.settings.max_characters:
                         raise AppError("input_too_large", "Vision text exceeds the processing limit.")
-                    enriched, cost = self._classification_call(job, self.generative.enrich, text, taxonomy)
-                    usage.append({"provider": "generative", **cost})
+                    enriched, cost = self._classification_call(job, self.generative.discover, text)
+                    usage.append({"provider": "discovery", **cost})
                 if not enriched["text_readable"]:
                     raise AppError("ocr_unreliable", "The document text is too garbled to classify. Read the original with vision or review it in Paperless.")
-                enriched = clean_suggestions(enriched, taxonomy, text)
-            answers, cost = self._classification_call(job, self.jev.classify, text, taxonomy, enriched["new_tags"])
+                enriched = clean_subjects(enriched, text, reserved_names)
+                if enriched["subjects"]:
+                    matches, cost = self._classification_call(job, self.jev.reconcile, enriched["subjects"], taxonomy)
+                    if cost is not None:
+                        usage.append({"provider": "jev_matching", **cost})
+            answers, cost = self._classification_call(job, self.jev.classify, text, taxonomy, enriched["subjects"])
             usage.append({"provider": "jev", **cost})
             tag_matches = [{**tag, "probability": answers["tag_" + str(tag["id"])]["noul"]} for tag in taxonomy["tags"]]
-            new_tags = [{**tag, "probability": answers["new_" + str(i)]["noul"]} for i, tag in enumerate(enriched["new_tags"])]
+            subjects = [{**tag, **matches[i], "subject_index": i, "probability": answers["new_" + str(i)]["noul"]}
+                        for i, tag in enumerate(enriched["subjects"])]
             chosen = answers.get("document_type")
             selected_type = None
             if chosen and chosen["choice"] != "unknown":
                 selected_type = next(t for t in taxonomy["types"] if "type_" + str(t["id"]) == chosen["choice"])
             analysis = {"source": source, "excerpt": text[:8000], "excerpt_truncated": len(text) > 8000,
                 "tags": sorted(tag_matches, key=lambda t: (-t["probability"], t["name"])),
-                "new_tags": new_tags, "title": enriched["title"], "type": selected_type,
+                "subjects": subjects, "new_tags": [s for s in subjects if s["existing_tag_id"] is None],
+                "title": enriched["title"], "type": selected_type,
                 "type_answer": chosen, "usage": usage}
             self.store.cache_set(cache_key, analysis)
         proposal = {**analysis, "document_id": document["id"], "before": metadata(document),
             "input_hash": text_hash(document), "taxonomy": taxonomy, "cache_key": cache_key, "cached": cached,
-            "created_at": time.time(), "schema_version": 1}
+            "created_at": time.time(), "revision": uuid.uuid4().hex, "schema_version": 3,
+            "prompt_version": PROMPT_VERSION}
         self.store.change(job["id"], ["running"], "review", proposal=proposal, error=None, error_code=None)
 
     def approve(self, identifier, approval):
         job = self.store.get(identifier)
         if not job or job["status"] not in ("review", "deferred"):
             raise AppError("state_conflict", "This proposal is no longer waiting for review.")
+        if not approval.proposal_revision or approval.proposal_revision != job["proposal_revision"]:
+            raise AppError("stale_proposal", "This proposal changed. Close and reopen it before approving.")
         if approval.title is not None and not approval.title.strip():
             raise AppError("empty_title", "A title cannot be empty.")
-        taxonomy = self.allowed(self.taxonomy())
+        full_taxonomy = self.taxonomy()
+        taxonomy = self.allowed(full_taxonomy)
         if not set(approval.tag_ids) <= {t["id"] for t in taxonomy["tags"]}:
             raise AppError("invalid_tags", "A selected tag is missing or reserved for a workflow.")
         if approval.document_type is not None and approval.document_type not in {t["id"] for t in taxonomy["types"]}:
             raise AppError("invalid_type", "The selected document type no longer exists.")
         if any(i < 0 or i >= len(job["proposal"]["new_tags"]) for i in approval.new_tag_indices):
             raise AppError("invalid_new_tag", "A selected new tag is not part of this proposal.")
-        if not self.store.change(identifier, ["review", "deferred"], "apply_queued", approval=approval.model_dump(), error=None, error_code=None):
-            raise AppError("state_conflict", "This proposal has already been handled.")
+        if approval.new_tag_indices and approval.subject_choices:
+            raise AppError("invalid_new_tag", "Submit one set of subject selections.")
+        candidates = job["proposal"].get("subjects", job["proposal"]["new_tags"])
+        choices = approval.subject_choices or [SubjectChoice(index=job["proposal"]["new_tags"][i].get("subject_index", i))
+                   for i in sorted(set(approval.new_tag_indices))]
+        if (len({c.index for c in choices}) != len(choices)
+                or any(c.index >= len(candidates) for c in choices)):
+            raise AppError("invalid_new_tag", "A subject selection is duplicated or is not part of this proposal.")
+        allowed_ids = {t["id"] for t in taxonomy["tags"]}
+        reserved_names = {tag_key(t["name"]) for t in full_taxonomy["tags"] if t["id"] not in allowed_ids}
+        selected, selected_ids, names = [], set(approval.tag_ids), set()
+        for choice in choices:
+            if choice.existing_tag_id is not None:
+                if choice.name is not None or choice.existing_tag_id not in allowed_ids:
+                    raise AppError("invalid_tags", "Choose an available existing tag without a new name.")
+                selected_ids.add(choice.existing_tag_id)
+                continue
+            candidate = candidates[choice.index]
+            name = tag_key(choice.name if choice.name is not None else candidate["name"])
+            if (not name or len(name) > 80 or name in reserved_names or name in CONTROL_TAGS
+                    or name.startswith("paperless-gpt")):
+                raise AppError("reserved_tag", "Choose a nonempty tag name that is not reserved for a workflow.")
+            exact = [t for t in taxonomy["tags"] if tag_key(t["name"]) == name]
+            if len(exact) > 1:
+                raise AppError("duplicate_tag", "Several existing tags have the selected name. Resolve the duplicate in Paperless.")
+            if exact:
+                selected_ids.add(exact[0]["id"])
+                continue
+            if name in names:
+                raise AppError("duplicate_tag", "Selected new tags must have distinct names.")
+            names.add(name)
+            selected.append(ApprovedTag(index=choice.index, name=name,
+                                        definition=candidate["definition"], evidence=candidate["evidence"]))
+        if len(selected) > 3:
+            raise AppError("too_many_new_tags", "Create at most three new tags per approval. Uncheck other subjects or reuse existing tags.")
+        if len(selected_ids) > 128:
+            raise AppError("invalid_tags", "Select at most 128 existing tags, including subject matches.")
+        approved = ApprovedChanges(**{**approval.model_dump(), "tag_ids": sorted(selected_ids)}, selected_new_tags=selected,
+                                   selected_existing_tags=[t for t in taxonomy["tags"] if t["id"] in selected_ids])
+        if not self.store.approve(identifier, approval.proposal_revision, approved.model_dump()):
+            raise AppError("stale_proposal", "This proposal changed. Close and reopen it before approving.")
 
     def apply(self, job):
         proposal = job["proposal"]
-        approval = Approval.model_validate(job["approval"])
+        approval = ApprovedChanges.model_validate(job["approval"])
+        if approval.proposal_revision and approval.proposal_revision != job["proposal_revision"]:
+            raise AppError("stale_proposal", "The approved proposal changed. Reclassify before applying.")
         doc_id = job["document_id"]
         current = self.paperless.document(doc_id)
         if text_hash(current) != proposal["input_hash"]:
@@ -157,6 +217,21 @@ class Service:
         if queue_id and queue_id not in current.get("tags", []):
             raise AppError("queue_removed", "Document was removed from the intake queue.")
         taxonomy = self.taxonomy()
+        operations = self.store.operations(job["id"])
+        # A confirmed write is a historical fact, not permission to overwrite a
+        # subsequent edit. Check all completed operations before any more writes.
+        live_tags = {tag["id"]: tag for tag in taxonomy["tags"]}
+        for name, operation in operations.items():
+            if not operation["complete"]:
+                continue
+            if name.startswith("tag:"):
+                tag = live_tags.get(operation["result"]["tag_id"])
+                if not tag or tag_key(tag["name"]) != tag_key(operation["payload"]["name"]):
+                    raise AppError("write_conflict", "A previously resolved tag was renamed or deleted. Close this entry and review a fresh proposal.")
+            elif name == "metadata" and any(current.get(k) != v for k, v in operation["payload"]["desired"].items()):
+                raise AppError("write_conflict", "Previously confirmed metadata was changed. Close this entry and review a fresh proposal.")
+            elif name == "tags" and not set(operation["payload"]["add"]) <= set(current.get("tags", [])):
+                raise AppError("write_conflict", "Previously confirmed tags were removed. Close this entry and review a fresh proposal.")
         # New entries are allowed; renaming/deleting entries used during inference is not.
         for group in ("tags", "types"):
             live = {t["id"]: t["name"] for t in taxonomy[group]}
@@ -166,6 +241,10 @@ class Service:
         if any(definitions[t["id"]] != t.get("definition", "") for t in proposal["taxonomy"]["tags"]):
             raise AppError("stale_taxonomy", "Tag definitions changed. Reclassify before applying.")
         allowed = self.allowed(taxonomy)
+        for tag in approval.selected_existing_tags:
+            current_tag = live_tags.get(tag.id)
+            if not current_tag or current_tag["name"] != tag.name or current_tag.get("definition", "") != tag.definition:
+                raise AppError("stale_tags", "A selected existing tag changed after approval. Review a fresh proposal.")
         if not set(approval.tag_ids) <= {t["id"] for t in allowed["tags"]}:
             raise AppError("stale_tags", "A selected tag is no longer available for classification.")
         if approval.document_type is not None and approval.document_type not in {t["id"] for t in allowed["types"]}:
@@ -182,11 +261,22 @@ class Service:
                 raise AppError("stale_metadata", "Someone changed the title or type after classification. Reclassify before applying.")
 
         ids = set(approval.tag_ids)
-        for index in sorted(set(approval.new_tag_indices)):
-            proposed = proposal["new_tags"][index]
+        selected = approval.selected_new_tags
+        if selected is None:  # Recover approvals persisted by older app versions.
+            selected = [ApprovedTag(index=i, **{k: proposal["new_tags"][i][k]
+                        for k in ("name", "definition", "evidence")}) for i in sorted(set(approval.new_tag_indices))]
+        for proposed in selected:
+            index = proposed.index
             name = "tag:" + str(index)
-            self.store.operation(job["id"], name, {"name": proposed["name"], "definition": proposed["definition"]})
-            matches = [t for t in self.paperless.all("tags") if tag_key(t["name"]) == tag_key(proposed["name"])]
+            operation = self.store.operation(job["id"], name, {"name": proposed.name, "definition": proposed.definition})
+            tags = self.paperless.all("tags")
+            if operation["complete"]:
+                created = next((t for t in tags if t["id"] == operation["result"]["tag_id"]), None)
+                if not created or tag_key(created["name"]) != tag_key(operation["payload"]["name"]):
+                    raise AppError("write_conflict", "A previously resolved tag changed. Close this entry and review a fresh proposal.")
+                matches = [created]
+            else:
+                matches = [t for t in tags if tag_key(t["name"]) == tag_key(proposed.name)]
             if len(matches) > 1:
                 raise AppError("duplicate_tag", "Several existing tags have the proposed name. Resolve the duplicate in Paperless.")
             if matches:
@@ -196,19 +286,24 @@ class Service:
                         or created["id"] == self.store.setting("intake", {}).get("tag_id")):
                     raise AppError("reserved_tag", "A new tag conflicts with an operational tag.")
             else:
-                # On timeout the next reconciliation finds the tag by normalized name.
-                created = self.paperless.create_tag(proposed["name"])
+                if not operation["new"]:
+                    raise AppError("tag_creation_uncertain", "An earlier tag creation is unconfirmed and no matching tag exists. Inspect Paperless, then close this entry and review a fresh proposal.")
+                created = self.paperless.create_tag(proposed.name)
             ids.add(created["id"])
-            self.store.define(created["id"], proposed["definition"])
-            self.store.finish_operation(job["id"], name, {"tag_id": created["id"]})
+            created_here = not matches or bool((operation["result"] or {}).get("created"))
+            self.store.finish_operation(job["id"], name, {"tag_id": created["id"], "created": created_here})
+            if created_here:
+                self.store.define(created["id"], proposed.definition, replace=False)
 
         # Field-specific updates never send tags or unrelated document metadata.
         if values:
-            self.store.operation(job["id"], "metadata", {"before": proposal["before"], "desired": values})
+            operation = self.store.operation(job["id"], "metadata", {"before": proposal["before"], "desired": values})
             current = self.paperless.document(doc_id)
             if text_hash(current) != proposal["input_hash"]:
                 raise AppError("stale_document", "Document text changed before the update.")
             for field, desired in values.items():
+                if operation["complete"] and current.get(field) != desired:
+                    raise AppError("write_conflict", "Previously confirmed metadata was changed. Review a fresh proposal.")
                 if current.get(field) not in (proposal["before"].get(field), desired):
                     raise AppError("stale_metadata", "The document changed before the update.")
             pending = {k:v for k,v in values.items() if current.get(k) != v}
@@ -224,6 +319,8 @@ class Service:
             if text_hash(current) != proposal["input_hash"]:
                 raise AppError("stale_document", "Document text changed before tag application.")
             missing = ids - set(current.get("tags", []))
+            if operation["complete"] and missing:
+                raise AppError("write_conflict", "Previously confirmed tags were removed. Review a fresh proposal.")
             if missing:
                 # Adding a set twice is idempotent even if an earlier asynchronous task finishes late.
                 result = self.paperless.add_tags(doc_id, missing)

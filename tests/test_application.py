@@ -15,7 +15,7 @@ from PIL import Image
 from classifier.config import AppError, Settings
 from classifier.contracts import Approval, Options
 from classifier.paperless import Paperless
-from classifier.providers import Generative, Jev, clean_suggestions, render_pages
+from classifier.providers import Generative, Jev, clean_subjects, render_pages
 from classifier.service import Service
 from classifier.store import Store
 from classifier.web import create_app
@@ -79,6 +79,10 @@ class FakeJev:
     def __init__(self):
         self.calls=0
 
+    def reconcile(self, subjects, taxonomy):
+        return [{"existing_tag_id": None, "match_method": "semantic", "match_answer": None}
+                for subject in subjects], {"model": "synthetic-jev", "input_tokens": 20, "output_tokens": 10, "seconds": .01}
+
     def classify(self,text,taxonomy,proposed):
         self.calls+=1
         answers={"tag_"+str(t["id"]):{"type":"noul","noul":.9} for t in taxonomy["tags"]}
@@ -92,8 +96,8 @@ class FakeGenerative:
     def __init__(self):
         self.vision_calls=0
 
-    def enrich(self,text,taxonomy):
-        return {"text_readable":True,"title":"Solar installation invoice","new_tags":[copy.deepcopy(NEW_TAG)]},{"model":"synthetic-generator","input_tokens":50,"output_tokens":20,"seconds":.01}
+    def discover(self,text):
+        return {"text_readable":True,"title":"Solar installation invoice","subjects":[copy.deepcopy(NEW_TAG)]},{"model":"synthetic-generator","input_tokens":50,"output_tokens":20,"seconds":.01}
 
     def vision(self,data,mime):
         self.vision_calls+=1
@@ -117,7 +121,7 @@ class ServiceTests(unittest.TestCase):
         return self.store.get(job["id"])
 
     def approve(self,job,**values):
-        self.service.approve(job["id"],Approval(**values))
+        self.service.approve(job["id"],Approval(proposal_revision=job["proposal_revision"], **values))
         self.service.step()
         return self.store.get(job["id"])
 
@@ -160,17 +164,17 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.jev.calls,0)
 
     def test_garbled_long_ocr_uses_readability_gate_and_vision(self):
-        good=self.generative.enrich(TEXT,{})
-        self.generative.enrich=Mock(side_effect=[({"text_readable":False,"title":"","new_tags":[]},good[1]),good])
+        good=self.generative.discover(TEXT)
+        self.generative.discover=Mock(side_effect=[({"text_readable":False,"title":"","subjects":[]},good[1]),good])
         job=self.classify()
         self.assertEqual(job["proposal"]["source"],"vision")
         self.assertEqual(self.generative.vision_calls,1)
-        self.assertEqual(self.generative.enrich.call_count,2)
+        self.assertEqual(self.generative.discover.call_count,2)
         self.assertEqual(self.jev.calls,1)
         self.assertEqual(self.paperless.writes,[])
 
     def test_garbled_ocr_without_vision_is_a_visible_error(self):
-        self.generative.enrich=Mock(return_value=({"text_readable":False,"title":"","new_tags":[]},{}))
+        self.generative.discover=Mock(return_value=({"text_readable":False,"title":"","subjects":[]},{}))
         job=self.classify(vision_fallback=False)
         self.assertEqual(job["error_code"],"ocr_unreliable")
         self.assertEqual(self.jev.calls,0)
@@ -194,7 +198,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_failed_job_keeps_its_name_before_a_proposal_exists(self):
         self.paperless.doc["title"]="Example insurance statement"
-        self.generative.enrich=Mock(side_effect=AppError("generative_filtered","Review the original."))
+        self.generative.discover=Mock(side_effect=AppError("generative_filtered","Review the original."))
         job=self.classify()
         self.assertIsNone(job["proposal"])
         self.paperless.document=Mock(side_effect=AppError("paperless_connection","Unavailable"))
@@ -323,7 +327,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_restart_marks_ambiguous_application_for_reconciliation(self):
         job=self.classify()
-        self.service.approve(job["id"],Approval(tag_ids=[1]))
+        self.service.approve(job["id"],Approval(proposal_revision=job["proposal_revision"], tag_ids=[1]))
         self.store.claim()
         Store(self.settings.data_dir).recover()
         self.assertEqual(self.store.get(job["id"])["status"],"apply_error")
@@ -352,7 +356,7 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(result.status_code,200)
             self.service.step()
             identifier=result.json()["jobs"][0]["id"]
-            response=client.post(f"/api/jobs/{identifier}/apply",headers=headers,json={"tag_ids":[1],"new_tag_indices":[0],"title":"Reviewed title"})
+            response=client.post(f"/api/jobs/{identifier}/apply",headers=headers,json={"proposal_revision":self.store.get(identifier)["proposal_revision"],"tag_ids":[1],"new_tag_indices":[0],"title":"Reviewed title"})
             self.assertEqual(response.status_code,200)
             self.assertEqual(client.post(f"/api/jobs/{identifier}/apply",headers=headers,json={}).status_code,400)
             self.service.step()
@@ -413,9 +417,9 @@ class AdapterTests(unittest.TestCase):
         client.system_one.assert_not_called()
 
     def test_new_tags_require_verbatim_evidence_and_deduplicate_names(self):
-        result={"title":" Title ","new_tags":[NEW_TAG,{**NEW_TAG,"name":"SOLAR ENERGY"},{**NEW_TAG,"name":"finance"},{**NEW_TAG,"name":"classifier-queue"},{**NEW_TAG,"name":"fiction","evidence":"not in the document"}]}
-        clean=clean_suggestions(result,{"tags":[{"name":"Finance"}]},TEXT)
-        self.assertEqual(clean,{"title":"Title","new_tags":[NEW_TAG]})
+        result={"title":" Title ","subjects":[NEW_TAG,{**NEW_TAG,"name":"SOLAR ENERGY"},{**NEW_TAG,"name":"finance"},{**NEW_TAG,"name":"classifier-queue"},{**NEW_TAG,"name":"fiction","evidence":"not in the document"}]}
+        clean=clean_subjects(result,TEXT)
+        self.assertEqual(clean,{"title":"Title","subjects":[NEW_TAG,{**NEW_TAG,"name":"finance"}]})
 
     def test_vision_renders_all_frames_and_rejects_over_limit(self):
         images=[Image.new("RGB",(20,20),color=color) for color in ("red","blue")]
@@ -427,7 +431,7 @@ class AdapterTests(unittest.TestCase):
     def test_generative_incomplete_is_not_a_successful_empty_result(self):
         client=Mock()
         client.responses.with_raw_response.parse.return_value.http_response.json.return_value={"status":"incomplete"}
-        with self.assertRaises(AppError) as error:Generative(self.settings,client).enrich(TEXT,{"tags":[]})
+        with self.assertRaises(AppError) as error:Generative(self.settings,client).discover(TEXT)
         self.assertEqual(error.exception.code,"generative_incomplete")
 
 

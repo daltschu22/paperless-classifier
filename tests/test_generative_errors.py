@@ -75,6 +75,18 @@ class GenerativeResponseTests(unittest.TestCase):
         self.assertFalse(self.requests[0]["store"])
         self.assertTrue(self.requests[0]["text"]["format"]["strict"])
 
+    def test_discovery_receives_only_document_text_and_parses_open_vocabulary_subjects(self):
+        result = {"text_readable": True, "title": "Synthetic charging invoice", "subjects": [
+            {"name": "ev-charging", "definition": "Charging electric vehicles.", "evidence": "charger installation"}]}
+        provider = self.provider(self.response(text=json.dumps(result)))
+        parsed, usage = provider.discover("Synthetic charger installation invoice.")
+        request = self.requests[0]
+        self.assertEqual(json.loads(request['input'][0]['content'][0]['text']),
+                         {'ocr_text': 'Synthetic charger installation invoice.'})
+        self.assertEqual(parsed, result)
+        self.assertFalse(request['store'])
+        self.assertEqual(usage['model'], 'synthetic-model')
+
     def test_timeout_is_reported_without_exposing_request_details(self):
         def handle(request):
             raise httpx2.ReadTimeout("SECRET request details", request=request)

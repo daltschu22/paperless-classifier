@@ -16,10 +16,10 @@ class NewTag(StrictModel):
     evidence: str = Field(min_length=1, max_length=500)
 
 
-class Enrichment(StrictModel):
+class Discovery(StrictModel):
     text_readable: bool
     title: str = Field(max_length=160)
-    new_tags: list[NewTag] = Field(max_length=3)
+    subjects: list[NewTag] = Field(max_length=6)
 
 
 class VisionText(StrictModel):
@@ -37,11 +37,36 @@ class QueueRequest(Options):
     document_ids: list[int] = Field(min_length=1, max_length=10)
 
 
+class SubjectChoice(StrictModel):
+    index: int = Field(ge=0)
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    existing_tag_id: int | None = Field(default=None, gt=0)
+
+
+class ExistingTag(StrictModel):
+    id: int
+    name: str
+    definition: str = ""
+
+
 class Approval(StrictModel):
+    # Optional in storage for approvals made before revision binding was added.
+    # Service.approve requires it on every new submission.
+    proposal_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     tag_ids: list[int] = Field(default_factory=list, max_length=128)
     document_type: int | None = None
     title: str | None = Field(default=None, min_length=1, max_length=160)
     new_tag_indices: list[int] = Field(default_factory=list, max_length=3)
+    subject_choices: list[SubjectChoice] = Field(default_factory=list, max_length=6)
+
+
+class ApprovedTag(NewTag):
+    index: int = Field(ge=0)
+
+
+class ApprovedChanges(Approval):
+    selected_new_tags: list[ApprovedTag] | None = None
+    selected_existing_tags: list[ExistingTag] = Field(default_factory=list)
 
 
 class Intake(StrictModel):
