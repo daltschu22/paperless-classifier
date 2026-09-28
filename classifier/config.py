@@ -13,7 +13,7 @@ class Settings:
     origin: str = "http://127.0.0.1:8098"
     paperless_public_url: str = ""
     openai_key: str = ""
-    generative_model: str = "gpt-5.6-sol"
+    generative_model: str = "gpt-6-sol"
     jev_model: str = "jev-1.13.0"
     max_characters: int = 60000
     max_pages: int = 8
@@ -34,7 +34,7 @@ class Settings:
                    Path(os.environ.get("DATA_DIR", "private/app-data")), origin,
                    os.environ.get("PAPERLESS_PUBLIC_URL", base).rstrip("/"),
                    os.environ.get("OPENAI_API_KEY", ""),
-                   os.environ.get("GENERATIVE_MODEL", "gpt-5.6-sol"),
+                   os.environ.get("GENERATIVE_MODEL", "gpt-6-sol"),
                    os.environ.get("JEV_MODEL", "jev-1.13.0"))
 
 
