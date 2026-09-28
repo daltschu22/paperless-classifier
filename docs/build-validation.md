@@ -40,3 +40,9 @@ The diagnostic dataset was one user-reported document; only private reports and 
 - Chromium browser smoke passed at 1440px desktop and 390px mobile, including new-tag renaming, reuse of an existing tag, and an old review tab submitting after a second tab regenerated the proposal. Existing login, apply, history, settings, queue-removal and layout checks also passed, with no page errors.
 
 These checks used synthetic text, adapters, and disposable local databases. They made no live provider calls or Paperless writes. The matching decisions in the tests are simulated: they establish application behavior, not real synonym accuracy or outlier recall. The historical live checks above predate this discovery pipeline; private evaluation and deployment validation of this revision remain outstanding.
+
+## Generative model selection — 2026-09-28
+
+The application default, example configuration, local override, and deployed classifier override now select `gpt-6-sol` for title/subject discovery and vision. The configured API account could retrieve this model's metadata. The existing deployed classifier was idle before its model override was changed and the service restarted; its active settings reported `gpt-6-sol` and its health check passed. This configuration update did not deploy the newer application revision.
+
+The shared `./check` passed all 85 offline tests and both synthetic research dry runs. Direct settings checks verified the constructor default, environment default, and explicit override behavior. No document inference was run for this model change, and the historical model identities and results above remain unchanged; these checks do not establish GPT-6 Sol transcription or classification accuracy.
